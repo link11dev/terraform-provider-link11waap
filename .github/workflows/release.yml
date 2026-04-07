@@ -1,0 +1,51 @@
+name: Release archive of provider binary
+
+on:
+  push:
+    # trigger release only by pushing a tag
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+  issues: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.name_of_branch.outputs.TAG_NAME }}
+    steps:
+      - name: Name of branch
+        id: name_of_branch
+        run: |
+          echo TAG_NAME="${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Run tests
+        run: |
+          make test
+
+      - name: Import GPG key
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@v7
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          PASSPHRASE: ""
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version:  '~> v2'
+          args: release --clean --timeout 45m
+        env:
+          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASER_TOKEN }}
