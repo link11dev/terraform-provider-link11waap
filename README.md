@@ -2,6 +2,8 @@
 
 Terraform provider for managing [Link11 WAAP](https://www.link11.com/) (Web Application and API Protection) resources.
 
+![Link11 Logo](img/link11_logo.jpeg)
+
 ## Requirements
 
 - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
