@@ -1,0 +1,4 @@
+*_test.go
+
+# tmp exclude due to empty interface
+internal/resources/rate_limit_rule.go

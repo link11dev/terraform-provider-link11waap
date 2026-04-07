@@ -1,0 +1,47 @@
+name: Secure
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  semgrep:
+    runs-on: ubuntu-24.04
+    container:
+      image: semgrep/semgrep
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep scan --sarif --output=semgrep.sarif --error --severity=WARNING --severity=ERROR
+        env:
+          SEMGREP_RULES: >-
+            p/command-injection
+            p/cwe-top-25
+            p/gitleaks
+            p/golang
+            p/gosec
+            p/insecure-transport
+            p/owasp-top-ten
+            p/r2c-best-practices
+            p/r2c-bug-scan
+            p/r2c-security-audit
+            p/secrets
+            p/security-audit
+            p/sql-injection
+            p/xss
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-results
+          path: semgrep.sarif
+
+  govulncheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod

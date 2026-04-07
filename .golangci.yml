@@ -1,0 +1,20 @@
+version: "2"
+
+
+linters:
+  default: none
+  enable:
+    - revive
+    - govet
+    - unused
+    - whitespace
+    - misspell
+  fast: false
+  settings:
+    gofmt:
+      simplify: false
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
