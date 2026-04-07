@@ -1,0 +1,16 @@
+example.tf
+terraform.tfplan
+terraform.tfstate
+./*.tfstate
+.terraform/
+*.tfvars
+*.auto.tfvars
+*.log
+*.bak
+.env
+coverage.txt
+
+# don't upload build to git
+terraform-provider-link11waap
+tf.zip
+
