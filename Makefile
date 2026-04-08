@@ -25,8 +25,8 @@ build:
 
 ## install: builds and installs the terraform provider binary to the local LINUX terraform plugin directory
 install: build
-	mkdir -p ~/.terraform.d/plugins/registry.terraform.io/link11/link11waap/0.1.0/linux_amd64
-	mv terraform-provider-link11waap ~/.terraform.d/plugins/registry.terraform.io/link11/link11waap/0.1.0/linux_amd64/
+	mkdir -p ~/.terraform.d/plugins/registry.terraform.io/link11dev/link11waap/0.1.0/linux_amd64
+	mv terraform-provider-link11waap ~/.terraform.d/plugins/registry.terraform.io/link11dev/link11waap/0.1.0/linux_amd64/
 
 ## test: runs all tests with verbose output
 test:

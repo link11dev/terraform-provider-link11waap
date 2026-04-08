@@ -22,7 +22,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/link11/link11waap",
+		Address: "registry.terraform.io/link11dev/link11waap",
 		Debug:   debug,
 	}
 

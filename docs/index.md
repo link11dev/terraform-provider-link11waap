@@ -15,7 +15,7 @@ Terraform provider for Link11 WAAP (Web Application and API Protection).
 terraform {
   required_providers {
     link11waap = {
-      source  = "link11/link11waap"
+      source  = "link11dev/link11waap"
       version = "~> 0.1"
     }
   }
