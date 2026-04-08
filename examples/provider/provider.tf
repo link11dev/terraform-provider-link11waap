@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     link11waap = {
-      source  = "link11/link11waap"
+      source  = "link11dev/link11waap"
       version = "~> 0.1"
     }
   }
