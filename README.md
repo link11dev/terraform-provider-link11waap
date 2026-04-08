@@ -156,21 +156,3 @@ make lint
 ```bash
 make docs
 ```
-
-## Project Structure
-
-```text
-.
-├── main.go                    # Provider entry point
-├── go.mod                     # Go module definition
-├── GNUmakefile                # Build automation
-├── internal/
-│   ├── provider/              # Provider configuration
-│   ├── client/                # HTTP API client
-│   ├── resources/             # Terraform resources
-│   └── datasources/           # Terraform data sources
-└── examples/                  # Example configurations
-    ├── provider/
-    ├── resources/
-    └── data-sources/
-```
