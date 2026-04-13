@@ -8,7 +8,7 @@ description: |-
 
 Terraform provider for Link11 WAAP (Web Application and API Protection).
 
-For detailed documentation, visit the [Link11 WAAP Documentation Portal](https://waap.docs.link11.com/using-the-product/how-do-i.../use-terraform-with-link11-waap).
+For detailed documentation, visit the <a href="https://waap.docs.link11.com/using-the-product/how-do-i.../use-terraform-with-link11-waap">Link11 WAAP Documentation Portal</a>.
 
 ## Example Usage
 
