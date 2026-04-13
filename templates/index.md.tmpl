@@ -1,0 +1,17 @@
+---
+page_title: "{{.ProviderName}} Provider"
+description: |-
+  {{ .Description | trimspace }}
+---
+
+# {{.ProviderName}} Provider
+
+{{ .Description | trimspace }}
+
+For detailed documentation, visit the [Link11 WAAP Documentation Portal](https://waap.docs.link11.com/using-the-product/how-do-i.../use-terraform-with-link11-waap).
+
+## Example Usage
+
+{{ tffile "examples/provider/provider.tf" }}
+
+{{ .SchemaMarkdown | trimspace }}
