@@ -4,6 +4,12 @@ Terraform provider for managing [Link11 WAAP](https://www.link11.com/) (Web Appl
 
 ![Link11 Logo](img/link11_logo.jpeg)
 
+## Using the provider
+
+Getting Started with Terraform at WAAP Link11: [waap.docs.link11.com](https://waap.docs.link11.com/using-the-product/how-do-i.../use-terraform-with-link11-waap).
+
+Documentation is available at: [docs/providers/link11waap](https://registry.terraform.io/providers/link11dev/link11waap/latest/docs).
+
 ## Requirements
 
 - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
