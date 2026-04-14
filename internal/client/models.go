@@ -205,6 +205,7 @@ type ACLProfile struct {
 
 // ProxyTemplate represents a proxy template in the API
 type ProxyTemplate struct {
+	ID                            string                        `json:"id,omitempty"`
 	Name                          string                        `json:"name"`
 	Description                   string                        `json:"description,omitempty"`
 	ACAOHeader                    bool                          `json:"acao_header"`

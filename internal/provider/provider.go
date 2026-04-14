@@ -129,6 +129,7 @@ func (p *Link11WaapProvider) Resources(_ context.Context) []func() resource.Reso
 		resources.NewMobileApplicationGroupResource,
 		resources.NewRateLimitRuleResource,
 		resources.NewEdgeFunctionResource,
+		resources.NewProxyTemplateResource,
 	}
 }
 
@@ -148,5 +149,6 @@ func (p *Link11WaapProvider) DataSources(_ context.Context) []func() datasource.
 		datasources.NewMobileApplicationGroupsDataSource,
 		datasources.NewRateLimitRulesDataSource,
 		datasources.NewEdgeFunctionsDataSource,
+		datasources.NewProxyTemplatesDataSource,
 	}
 }
