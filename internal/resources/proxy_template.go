@@ -27,10 +27,12 @@ var (
 	_ resource.ResourceWithImportState = &ProxyTemplateResource{}
 )
 
+// ProxyTemplateResource manages a Link11 WAAP Proxy Template
 type ProxyTemplateResource struct {
 	client *client.Client
 }
 
+// ProxyTemplateResourceModel maps the resource schema data
 type ProxyTemplateResourceModel struct {
 	ConfigID                      types.String `tfsdk:"config_id"`
 	ID                            types.String `tfsdk:"id"`
@@ -63,6 +65,8 @@ type ProxyTemplateResourceModel struct {
 	AdvancedConfiguration         types.List   `tfsdk:"advanced_configuration"`
 }
 
+// AdvancedConfigModel represents an individual advanced configuration block
+// in the resource schema
 type AdvancedConfigModel struct {
 	Name          types.String `tfsdk:"name"`
 	Protocol      types.List   `tfsdk:"protocol"`
@@ -70,14 +74,17 @@ type AdvancedConfigModel struct {
 	Description   types.String `tfsdk:"description"`
 }
 
+// NewProxyTemplateResource creates a new instance of ProxyTemplateResource
 func NewProxyTemplateResource() resource.Resource {
 	return &ProxyTemplateResource{}
 }
 
+// Metadata returns the proxy template resource type name
 func (r *ProxyTemplateResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_proxy_template"
 }
 
+// Schema defines the schema for the proxy template resource
 func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Proxy Template in Link11 WAAP.",
@@ -297,10 +304,12 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 	}
 }
 
+// Configure sets up the API client for the proxy template resource using provider data
 func (r *ProxyTemplateResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.client = providerutil.ConfigureClient(req.ProviderData, &resp.Diagnostics)
 }
 
+// Create handles the creation of a new proxy template resource
 func (r *ProxyTemplateResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var plan ProxyTemplateResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -324,6 +333,7 @@ func (r *ProxyTemplateResource) Create(ctx context.Context, req resource.CreateR
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
+// Read reads the proxy template resource
 func (r *ProxyTemplateResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	var state ProxyTemplateResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -412,6 +422,7 @@ func (r *ProxyTemplateResource) Read(ctx context.Context, req resource.ReadReque
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
+// Update updates the proxy template resource
 func (r *ProxyTemplateResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var plan ProxyTemplateResourceModel
 	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
@@ -433,6 +444,7 @@ func (r *ProxyTemplateResource) Update(ctx context.Context, req resource.UpdateR
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
 
+// Delete deletes the proxy template resource
 func (r *ProxyTemplateResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state ProxyTemplateResourceModel
 	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
@@ -450,6 +462,7 @@ func (r *ProxyTemplateResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 }
 
+// ImportState imports the proxy template resource state using the provided ID
 func (r *ProxyTemplateResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
 	if len(parts) != 2 {

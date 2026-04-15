@@ -13,15 +13,18 @@ import (
 
 var _ datasource.DataSource = &ProxyTemplatesDataSource{}
 
+// ProxyTemplatesDataSource implements the data source for listing proxy templates
 type ProxyTemplatesDataSource struct {
 	client *client.Client
 }
 
+// ProxyTemplatesDataSourceModel describes the data source model for proxy templates
 type ProxyTemplatesDataSourceModel struct {
-	ConfigID       types.String               `tfsdk:"config_id"`
-	ProxyTemplates []ProxyTemplateDataModel   `tfsdk:"proxy_templates"`
+	ConfigID       types.String             `tfsdk:"config_id"`
+	ProxyTemplates []ProxyTemplateDataModel `tfsdk:"proxy_templates"`
 }
 
+// ProxyTemplateDataModel describes the data model for a single proxy template
 type ProxyTemplateDataModel struct {
 	Name                          types.String `tfsdk:"name"`
 	Description                   types.String `tfsdk:"description"`
@@ -52,6 +55,7 @@ type ProxyTemplateDataModel struct {
 	AdvancedConfiguration         types.List   `tfsdk:"advanced_configuration"`
 }
 
+// AdvancedConfigDataModel describes the data model for advanced configuration of a proxy template
 type AdvancedConfigDataModel struct {
 	Name          types.String `tfsdk:"name"`
 	Protocol      types.List   `tfsdk:"protocol"`
@@ -59,14 +63,17 @@ type AdvancedConfigDataModel struct {
 	Description   types.String `tfsdk:"description"`
 }
 
+// NewProxyTemplatesDataSource returns a new instance of the proxy templates data source
 func NewProxyTemplatesDataSource() datasource.DataSource {
 	return &ProxyTemplatesDataSource{}
 }
 
+// Metadata returns the data source type name
 func (d *ProxyTemplatesDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_proxy_templates"
 }
 
+// Schema defines the schema for the proxy templates data source
 func (d *ProxyTemplatesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Lists all proxy templates in a configuration.",
@@ -82,30 +89,30 @@ func (d *ProxyTemplatesDataSource) Schema(_ context.Context, _ datasource.Schema
 					Attributes: map[string]schema.Attribute{
 						"name":                              schema.StringAttribute{Computed: true},
 						"description":                       schema.StringAttribute{Computed: true},
-						"acao_header":                        schema.BoolAttribute{Computed: true},
-						"xff_header_name":                    schema.StringAttribute{Computed: true},
-						"xrealip_header_name":                schema.StringAttribute{Computed: true},
-						"proxy_connect_timeout":              schema.StringAttribute{Computed: true},
-						"proxy_read_timeout":                 schema.StringAttribute{Computed: true},
-						"proxy_send_timeout":                 schema.StringAttribute{Computed: true},
-						"upstream_host":                      schema.StringAttribute{Computed: true},
-						"client_body_timeout":                schema.StringAttribute{Computed: true},
-						"client_body_buffer_size":            schema.StringAttribute{Computed: true},
-						"client_header_timeout":              schema.StringAttribute{Computed: true},
-						"client_header_buffer_size":          schema.StringAttribute{Computed: true},
-						"client_max_body_size":               schema.StringAttribute{Computed: true},
-						"keepalive_timeout":                  schema.StringAttribute{Computed: true},
-						"send_timeout":                       schema.StringAttribute{Computed: true},
-						"limit_req_rate":                     schema.StringAttribute{Computed: true},
-						"limit_req_burst":                    schema.StringAttribute{Computed: true},
-						"mask_headers":                       schema.StringAttribute{Computed: true},
-						"custom_listener":                    schema.BoolAttribute{Computed: true},
-						"large_client_header_buffers_count":  schema.StringAttribute{Computed: true},
-						"large_client_header_buffers_size":   schema.StringAttribute{Computed: true},
-						"conf_specific":                      schema.StringAttribute{Computed: true},
-						"ssl_conf_specific":                  schema.StringAttribute{Computed: true},
-						"ssl_ciphers":                        schema.StringAttribute{Computed: true},
-						"ssl_protocols":                      schema.ListAttribute{Computed: true, ElementType: types.StringType},
+						"acao_header":                       schema.BoolAttribute{Computed: true},
+						"xff_header_name":                   schema.StringAttribute{Computed: true},
+						"xrealip_header_name":               schema.StringAttribute{Computed: true},
+						"proxy_connect_timeout":             schema.StringAttribute{Computed: true},
+						"proxy_read_timeout":                schema.StringAttribute{Computed: true},
+						"proxy_send_timeout":                schema.StringAttribute{Computed: true},
+						"upstream_host":                     schema.StringAttribute{Computed: true},
+						"client_body_timeout":               schema.StringAttribute{Computed: true},
+						"client_body_buffer_size":           schema.StringAttribute{Computed: true},
+						"client_header_timeout":             schema.StringAttribute{Computed: true},
+						"client_header_buffer_size":         schema.StringAttribute{Computed: true},
+						"client_max_body_size":              schema.StringAttribute{Computed: true},
+						"keepalive_timeout":                 schema.StringAttribute{Computed: true},
+						"send_timeout":                      schema.StringAttribute{Computed: true},
+						"limit_req_rate":                    schema.StringAttribute{Computed: true},
+						"limit_req_burst":                   schema.StringAttribute{Computed: true},
+						"mask_headers":                      schema.StringAttribute{Computed: true},
+						"custom_listener":                   schema.BoolAttribute{Computed: true},
+						"large_client_header_buffers_count": schema.StringAttribute{Computed: true},
+						"large_client_header_buffers_size":  schema.StringAttribute{Computed: true},
+						"conf_specific":                     schema.StringAttribute{Computed: true},
+						"ssl_conf_specific":                 schema.StringAttribute{Computed: true},
+						"ssl_ciphers":                       schema.StringAttribute{Computed: true},
+						"ssl_protocols":                     schema.ListAttribute{Computed: true, ElementType: types.StringType},
 						"advanced_configuration": schema.ListNestedAttribute{
 							Computed: true,
 							NestedObject: schema.NestedAttributeObject{
@@ -124,10 +131,12 @@ func (d *ProxyTemplatesDataSource) Schema(_ context.Context, _ datasource.Schema
 	}
 }
 
+// Configure initializes the data source with the provider client
 func (d *ProxyTemplatesDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
 	d.client = providerutil.ConfigureClient(req.ProviderData, &resp.Diagnostics)
 }
 
+// Read retrieves the proxy templates from the API and sets the data source state
 func (d *ProxyTemplatesDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
 	var data ProxyTemplatesDataSourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
