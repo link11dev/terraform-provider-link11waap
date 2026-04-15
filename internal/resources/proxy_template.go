@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -244,7 +245,7 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 				Default:     stringdefault.StaticString("ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:!SHA1:!SHA256:!SHA384:!DSS:!aNULL"),
 			},
 			"ssl_protocols": schema.ListAttribute{
-				Description: "List of SSL/TLS protocols to enable. Valid values: SSLv2, SSLv3, TLSv1, TLSv1.1, TLSv1.2, TLSv1.3.",
+				Description: "List of SSL/TLS protocols to enable. Valid values: TLSv1.1, TLSv1.2, TLSv1.3.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
@@ -252,6 +253,12 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 					types.StringValue("TLSv1.2"),
 					types.StringValue("TLSv1.3"),
 				})),
+				Validators: []validator.List{
+					listvalidator.SizeAtLeast(1),
+					listvalidator.ValueStringsAre(
+						stringvalidator.OneOf("TLSv1.1", "TLSv1.2", "TLSv1.3"),
+					),
+				},
 			},
 			"advanced_configuration": schema.ListNestedAttribute{
 				Description: "Advanced nginx configuration blocks.",
@@ -373,7 +380,7 @@ func (r *ProxyTemplateResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Advanced Configuration
-	if pt.AdvancedConfiguration != nil {
+	if len(pt.AdvancedConfiguration) > 0 {
 		advModels := make([]AdvancedConfigModel, len(pt.AdvancedConfiguration))
 		for i, ac := range pt.AdvancedConfiguration {
 			model := AdvancedConfigModel{
