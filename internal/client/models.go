@@ -370,3 +370,16 @@ type EdgeFunction struct {
 	Code        string `json:"code"`
 	Phase       string `json:"phase"`
 }
+
+// GlobalFilter represents a global filter entry in the API
+type GlobalFilter struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Source      string      `json:"source"`
+	Mdate       string      `json:"mdate,omitempty"`
+	Active      bool        `json:"active"`
+	Description string      `json:"description,omitempty"`
+	Tags        []string    `json:"tags,omitempty"`
+	Action      interface{} `json:"action,omitempty"`
+	Rule        interface{} `json:"rule,omitempty"`
+}
