@@ -160,6 +160,24 @@ func TestTrustedNetsConfigValidator_ValidateResource(t *testing.T) {
 				strVal(""), strVal(""), strVal(""),
 			),
 		},
+		{
+			name: "ip with unknown address is allowed",
+			entry: makeTrustedNet(
+				strVal("ip"),
+				tftypes.NewValue(tftypes.String, tftypes.UnknownValue), // unknown address
+				strVal(""),
+				strVal(""),
+			),
+		},
+		{
+			name: "global_filter with unknown gf_id is allowed",
+			entry: makeTrustedNet(
+				strVal("global_filter"),
+				strVal(""),
+				tftypes.NewValue(tftypes.String, tftypes.UnknownValue), // unknown gf_id
+				strVal(""),
+			),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -409,6 +427,26 @@ func TestPlanetTrustedNetsResource_ImportState(t *testing.T) {
 	assert.Equal(t, "cfg123", got.ConfigID.ValueString())
 	assert.Equal(t, defaultPlanetEntryID, got.ID.ValueString())
 	assert.Equal(t, defaultPlanetEntryID, got.Name.ValueString())
+}
+
+func TestPlanetTrustedNetsResource_ImportState_WithDefaultSuffix(t *testing.T) {
+	r := &PlanetTrustedNetsResource{}
+	resp := testImportState(t, r, "cfg123/__default__")
+	require.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+
+	ctx := context.Background()
+	var got PlanetTrustedNetsResourceModel
+	diags := resp.State.Get(ctx, &got)
+	require.False(t, diags.HasError())
+	assert.Equal(t, "cfg123", got.ConfigID.ValueString())
+	assert.Equal(t, defaultPlanetEntryID, got.ID.ValueString())
+	assert.Equal(t, defaultPlanetEntryID, got.Name.ValueString())
+}
+
+func TestPlanetTrustedNetsResource_ImportState_InvalidSuffix(t *testing.T) {
+	r := &PlanetTrustedNetsResource{}
+	resp := testImportState(t, r, "cfg123/not-default")
+	assert.True(t, resp.Diagnostics.HasError())
 }
 
 func TestBuildPlanetBody(t *testing.T) {

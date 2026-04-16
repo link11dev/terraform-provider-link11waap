@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -169,20 +170,20 @@ func (v *trustedNetsConfigValidator) ValidateResource(ctx context.Context, req r
 
 		switch source {
 		case "ip":
-			if gfID != "" {
+			if !entry.GfID.IsUnknown() && gfID != "" {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("trusted_nets").AtListIndex(i).AtName("gf_id"),
 					"Invalid Attribute Combination",
 					"gf_id must be empty when source is 'ip'.",
 				)
 			}
-			if address == "" {
+			if !entry.Address.IsUnknown() && address == "" {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("trusted_nets").AtListIndex(i).AtName("address"),
 					"Missing Required Attribute",
 					"address is required when source is 'ip'.",
 				)
-			} else {
+			} else if !entry.Address.IsUnknown() && address != "" {
 				if _, err := netip.ParsePrefix(address); err != nil {
 					if net.ParseIP(address) == nil {
 						resp.Diagnostics.AddAttributeError(
@@ -195,14 +196,14 @@ func (v *trustedNetsConfigValidator) ValidateResource(ctx context.Context, req r
 			}
 
 		case "global_filter":
-			if address != "" {
+			if !entry.Address.IsUnknown() && address != "" {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("trusted_nets").AtListIndex(i).AtName("address"),
 					"Invalid Attribute Combination",
 					"address must be empty when source is 'global_filter'.",
 				)
 			}
-			if gfID == "" {
+			if !entry.GfID.IsUnknown() && gfID == "" {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("trusted_nets").AtListIndex(i).AtName("gf_id"),
 					"Missing Required Attribute",
@@ -311,9 +312,21 @@ func (r *PlanetTrustedNetsResource) Delete(_ context.Context, _ resource.DeleteR
 }
 
 // ImportState imports an existing planet trusted_nets resource.
-// The import ID is just the config_id (the entry ID is always __default__).
+// The import ID may be either:
+//   - "<config_id>"
+//   - "<config_id>/__default__"
 func (r *PlanetTrustedNetsResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), req.ID)...)
+	parts := strings.SplitN(req.ID, "/", 2)
+	configID := parts[0]
+	if len(parts) == 2 && parts[1] != defaultPlanetEntryID {
+		resp.Diagnostics.AddError(
+			"Invalid Import ID",
+			fmt.Sprintf("Import ID format must be <config_id> or <config_id>/%s, got: %s", defaultPlanetEntryID, req.ID),
+		)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), configID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), defaultPlanetEntryID)...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("name"), defaultPlanetEntryID)...)
 }
