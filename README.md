@@ -95,6 +95,7 @@ provider "link11waap" {
 | `link11waap_backend_service` | Manages backend services for server groups |
 | `link11waap_proxy_template` | Manages proxy templates for server groups |
 | `link11waap_global_filter` | Manages global filters for traffic filtering |
+| `link11waap_planet_trusted_nets` | Manages trusted networks for the planet configuration |
 | `link11waap_publish` | Triggers configuration publishing to edge nodes |
 | `link11waap_user` | Manages user accounts |
 
@@ -113,6 +114,7 @@ provider "link11waap" {
 | `link11waap_global_filters` | Lists all global filters |
 | `link11waap_global_filter` | Reads a specific global filter by name |
 | `link11waap_backend_services` | Lists all backend services |
+| `link11waap_planet_trusted_nets` | Reads the trusted networks for the planet configuration |
 | `link11waap_users` | Lists all user accounts |
 
 ## Usage Examples
