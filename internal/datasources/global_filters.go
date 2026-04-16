@@ -22,7 +22,7 @@ type GlobalFiltersDataSource struct {
 
 // GlobalFiltersDataSourceModel describes the data model for the global filters data source.
 type GlobalFiltersDataSourceModel struct {
-	ConfigID      types.String              `tfsdk:"config_id"`
+	ConfigID      types.String            `tfsdk:"config_id"`
 	GlobalFilters []GlobalFilterDataModel `tfsdk:"global_filters"`
 }
 
