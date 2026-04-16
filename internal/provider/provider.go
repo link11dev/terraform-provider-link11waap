@@ -152,5 +152,6 @@ func (p *Link11WaapProvider) DataSources(_ context.Context) []func() datasource.
 		datasources.NewEdgeFunctionsDataSource,
 		datasources.NewProxyTemplatesDataSource,
 		datasources.NewGlobalFiltersDataSource,
+		datasources.NewGlobalFilterDataSource,
 	}
 }

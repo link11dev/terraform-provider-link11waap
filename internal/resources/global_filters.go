@@ -43,7 +43,28 @@ type GlobalFilterResourceModel struct {
 	Active      types.Bool   `tfsdk:"active"`
 	Tags        types.List   `tfsdk:"tags"`
 	Action      types.String `tfsdk:"action"`
-	Rule        types.String `tfsdk:"rule"`
+	Rule        *RuleModel   `tfsdk:"rule"`
+}
+
+// RuleModel describes the rule block for a global filter.
+type RuleModel struct {
+	Relation types.String `tfsdk:"relation"`
+	Entries  []EntryModel `tfsdk:"entry"`
+	Groups   []GroupModel `tfsdk:"group"`
+}
+
+// EntryModel describes a leaf condition entry in a rule.
+type EntryModel struct {
+	Type    types.String `tfsdk:"type"`
+	Name    types.String `tfsdk:"name"`
+	Value   types.String `tfsdk:"value"`
+	Comment types.String `tfsdk:"comment"`
+}
+
+// GroupModel describes a nested rule group.
+type GroupModel struct {
+	Relation types.String `tfsdk:"relation"`
+	Entries  []EntryModel `tfsdk:"entry"`
 }
 
 // NewGlobalFilterResource creates a new global filter resource instance.
@@ -86,8 +107,8 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 				Default:     stringdefault.StaticString(""),
 			},
 			"source": schema.StringAttribute{
-				Description: "The source URL for the global filter.",
-				Required:    true,
+				Description: "The source of the global filter (always self-managed for user-created filters).",
+				Computed:    true,
 			},
 			"mdate": schema.StringAttribute{
 				Description: "The last modification date (server-managed).",
@@ -97,7 +118,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "Whether the global filter is active.",
 				Optional:    true,
 				Computed:    true,
-				Default:     booldefault.StaticBool(true),
+				Default:     booldefault.StaticBool(false),
 			},
 			"tags": schema.ListAttribute{
 				Description: "List of tags associated with the global filter.",
@@ -105,13 +126,12 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 				ElementType: types.StringType,
 			},
 			"action": schema.StringAttribute{
-				Description: "Action for the global filter. Allowed values: action-challenge, action-monitor, action-skip, action-global-filter-block, action-rate-limit-block, action-acl-block, action-contentfilter-block, action-dynamic-rule-block, action-waap-feed-block, action-https-redirect.",
+				Description: "Action to take when requests match this filter. Defaults to action-monitor. Allowed values: action-challenge, action-monitor, action-skip, action-global-filter-block, action-rate-limit-block, action-acl-block, action-contentfilter-block, action-dynamic-rule-block, action-waap-feed-block, action-https-redirect.",
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString(""),
+				Default:     stringdefault.StaticString("action-monitor"),
 				Validators: []validator.String{
 					stringvalidator.OneOf(
-						"",
 						"action-challenge",
 						"action-monitor",
 						"action-skip",
@@ -125,11 +145,97 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 					),
 				},
 			},
-			"rule": schema.StringAttribute{
-				Description: "The rule definition as a JSON string.",
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString("{}"),
+		},
+		Blocks: map[string]schema.Block{
+			"rule": schema.SingleNestedBlock{
+				Description: "The rule definition for matching requests.",
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Logical relation for combining entries. Must be OR or AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
+						},
+					},
+				},
+				Blocks: map[string]schema.Block{
+					"entry": schema.ListNestedBlock{
+						Description: "A leaf condition entry. Use 'name' for types that match against a named field (headers, cookies, args).",
+						NestedObject: schema.NestedBlockObject{
+							Attributes: map[string]schema.Attribute{
+								"type": schema.StringAttribute{
+									Required:    true,
+									Description: "Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).",
+									Validators: []validator.String{
+										stringvalidator.OneOf(
+											"asn", "authority", "company", "cookies", "country", "headers",
+											"ip", "method", "network", "organization", "path", "query",
+											"region", "secpolentryid", "secpolid", "secpolentryname",
+											"secpolname", "securitypolicy", "securitypolicyentry",
+											"securitypolicyentryid", "securitypolicyentryname",
+											"securitypolicyid", "securitypolicyname", "session",
+											"subregion", "tags", "uri",
+										),
+									},
+								},
+								"name":  schema.StringAttribute{Optional: true, Description: "For entry types that use a key-value pair (e.g. headers, cookies): the field name (e.g. header name or cookie name). When set, the entry is sent as [type, [name, value], comment] to the API."},
+								"value": schema.StringAttribute{Required: true, Description: "Value or regex to match."},
+								"comment": schema.StringAttribute{
+									Optional:    true,
+									Computed:    true,
+									Default:     stringdefault.StaticString(""),
+									Description: "Human-readable comment for this entry.",
+								},
+							},
+						},
+					},
+					"group": schema.ListNestedBlock{
+						Description: "A nested rule group, combining entries with its own relation.",
+						NestedObject: schema.NestedBlockObject{
+							Attributes: map[string]schema.Attribute{
+								"relation": schema.StringAttribute{
+									Required:    true,
+									Description: "Logical relation for combining entries in this group. Must be OR or AND.",
+									Validators: []validator.String{
+										stringvalidator.OneOf("OR", "AND"),
+									},
+								},
+							},
+							Blocks: map[string]schema.Block{
+								"entry": schema.ListNestedBlock{
+									Description: "A leaf condition entry within this group.",
+									NestedObject: schema.NestedBlockObject{
+										Attributes: map[string]schema.Attribute{
+											"type": schema.StringAttribute{
+												Required:    true,
+												Description: "Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).",
+												Validators: []validator.String{
+													stringvalidator.OneOf(
+														"asn", "authority", "company", "cookies", "country", "headers",
+														"ip", "method", "network", "organization", "path", "query",
+														"region", "secpolentryid", "secpolid", "secpolentryname",
+														"secpolname", "securitypolicy", "securitypolicyentry",
+														"securitypolicyentryid", "securitypolicyentryname",
+														"securitypolicyid", "securitypolicyname", "session",
+														"subregion", "tags", "uri",
+													),
+												},
+											},
+											"name":  schema.StringAttribute{Optional: true, Description: "For entry types that use a key-value pair (e.g. headers, cookies): the field name (e.g. header name or cookie name). When set, the entry is sent as [type, [name, value], comment] to the API."},
+											"value": schema.StringAttribute{Required: true},
+											"comment": schema.StringAttribute{
+												Optional:    true,
+												Computed:    true,
+												Default:     stringdefault.StaticString(""),
+												Description: "Human-readable comment.",
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -167,6 +273,7 @@ func (r *GlobalFilterResource) Create(ctx context.Context, req resource.CreateRe
 
 	// mdate is server-managed, set empty after create
 	plan.Mdate = types.StringValue("")
+	plan.Source = types.StringValue("self-managed")
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -210,9 +317,11 @@ func (r *GlobalFilterResource) Read(ctx context.Context, req resource.ReadReques
 	// Action: interface{} -> string
 	if filter.Action != nil {
 		if actionStr, ok := filter.Action.(string); ok {
+			if actionStr == "" {
+				actionStr = "action-monitor"
+			}
 			state.Action = types.StringValue(actionStr)
 		} else {
-			// Complex action type - marshal to JSON
 			actionBytes, marshalErr := json.Marshal(filter.Action)
 			if marshalErr != nil {
 				resp.Diagnostics.AddError("Error Marshaling Action", marshalErr.Error())
@@ -221,20 +330,16 @@ func (r *GlobalFilterResource) Read(ctx context.Context, req resource.ReadReques
 			state.Action = types.StringValue(string(actionBytes))
 		}
 	} else {
-		state.Action = types.StringValue("")
+		state.Action = types.StringValue("action-monitor")
 	}
 
-	// Rule: interface{} -> JSON string
-	if filter.Rule != nil {
-		ruleBytes, marshalErr := json.Marshal(filter.Rule)
-		if marshalErr != nil {
-			resp.Diagnostics.AddError("Error Marshaling Rule", marshalErr.Error())
-			return
-		}
-		state.Rule = types.StringValue(string(ruleBytes))
-	} else {
-		state.Rule = types.StringValue("{}")
+	// Rule: interface{} -> RuleModel
+	ruleModel, parseErr := apiRuleToModel(filter.Rule)
+	if parseErr != nil {
+		resp.Diagnostics.AddError("Error Parsing Rule", parseErr.Error())
+		return
 	}
+	state.Rule = ruleModel
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -261,6 +366,8 @@ func (r *GlobalFilterResource) Update(ctx context.Context, req resource.UpdateRe
 		)
 		return
 	}
+
+	plan.Source = types.StringValue("self-managed")
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -306,7 +413,7 @@ func buildGlobalFilterAPIModel(ctx context.Context, plan *GlobalFilterResourceMo
 		ID:          plan.ID.ValueString(),
 		Name:        plan.Name.ValueString(),
 		Description: plan.Description.ValueString(),
-		Source:      plan.Source.ValueString(),
+		Source:      "self-managed",
 		Active:      plan.Active.ValueBool(),
 	}
 
@@ -316,23 +423,140 @@ func buildGlobalFilterAPIModel(ctx context.Context, plan *GlobalFilterResourceMo
 	}
 
 	// Action: plain string
-	actionStr := plan.Action.ValueString()
-	if actionStr != "" {
-		filter.Action = actionStr
-	}
+	filter.Action = plan.Action.ValueString()
 
-	// Rule: JSON string -> interface{}
-	if !plan.Rule.IsNull() && !plan.Rule.IsUnknown() {
-		ruleStr := plan.Rule.ValueString()
-		if ruleStr != "" {
-			var rule interface{}
-			if err := json.Unmarshal([]byte(ruleStr), &rule); err != nil {
-				diags.AddError("Invalid Rule JSON", fmt.Sprintf("Could not parse rule JSON: %s", err.Error()))
-				return nil, diags
-			}
-			filter.Rule = rule
-		}
-	}
+	// Rule: RuleModel -> API wire format
+	filter.Rule = ruleModelToAPI(plan.Rule)
 
 	return filter, diags
+}
+
+// ruleModelToAPI converts a RuleModel to the API wire format (interface{} ready for JSON marshal).
+// Entries appear before groups in the entries array.
+func ruleModelToAPI(rule *RuleModel) interface{} {
+	if rule == nil {
+		return nil
+	}
+	entries := make([]interface{}, 0)
+	for _, e := range rule.Entries {
+		entries = append(entries, entryModelToAPI(e))
+	}
+	for _, g := range rule.Groups {
+		entries = append(entries, groupModelToAPI(g))
+	}
+	return map[string]interface{}{
+		"relation": rule.Relation.ValueString(),
+		"entries":  entries,
+	}
+}
+
+func entryModelToAPI(e EntryModel) interface{} {
+	comment := ""
+	if !e.Comment.IsNull() && !e.Comment.IsUnknown() {
+		comment = e.Comment.ValueString()
+	}
+	name := ""
+	if !e.Name.IsNull() && !e.Name.IsUnknown() {
+		name = e.Name.ValueString()
+	}
+	if name != "" {
+		return []interface{}{e.Type.ValueString(), []interface{}{name, e.Value.ValueString()}, comment}
+	}
+	return []interface{}{e.Type.ValueString(), e.Value.ValueString(), comment}
+}
+
+func groupModelToAPI(g GroupModel) interface{} {
+	entries := make([]interface{}, 0)
+	for _, e := range g.Entries {
+		entries = append(entries, entryModelToAPI(e))
+	}
+	return map[string]interface{}{
+		"relation": g.Relation.ValueString(),
+		"entries":  entries,
+	}
+}
+
+// apiRuleToModel parses the API response into a RuleModel.
+// Returns nil, nil when rawRule is nil.
+func apiRuleToModel(rawRule interface{}) (*RuleModel, error) {
+	if rawRule == nil {
+		return nil, nil
+	}
+	ruleMap, ok := rawRule.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("rule is not an object, got %T", rawRule)
+	}
+	model := &RuleModel{}
+	if rel, ok := ruleMap["relation"].(string); ok {
+		model.Relation = types.StringValue(rel)
+	}
+	rawEntries, _ := ruleMap["entries"].([]interface{})
+	for _, rawEntry := range rawEntries {
+		switch e := rawEntry.(type) {
+		case []interface{}:
+			em, err := apiEntryToModel(e)
+			if err != nil {
+				return nil, err
+			}
+			model.Entries = append(model.Entries, em)
+		case map[string]interface{}:
+			gm, err := apiGroupToModel(e)
+			if err != nil {
+				return nil, err
+			}
+			model.Groups = append(model.Groups, *gm)
+		}
+	}
+	return model, nil
+}
+
+func apiEntryToModel(raw []interface{}) (EntryModel, error) {
+	if len(raw) < 2 {
+		return EntryModel{}, fmt.Errorf("entry must have at least 2 elements, got %d", len(raw))
+	}
+	em := EntryModel{Name: types.StringNull()}
+	if t, ok := raw[0].(string); ok {
+		em.Type = types.StringValue(t)
+	}
+	comment := ""
+	if len(raw) >= 3 {
+		if c, ok := raw[2].(string); ok {
+			comment = c
+		}
+	}
+	em.Comment = types.StringValue(comment)
+	switch v := raw[1].(type) {
+	case string:
+		em.Value = types.StringValue(v)
+	case []interface{}:
+		if len(v) >= 2 {
+			if name, ok := v[0].(string); ok {
+				em.Name = types.StringValue(name)
+			}
+			if val, ok := v[1].(string); ok {
+				em.Value = types.StringValue(val)
+			}
+		}
+	default:
+		em.Value = types.StringValue(fmt.Sprintf("%v", v))
+	}
+	return em, nil
+}
+
+func apiGroupToModel(raw map[string]interface{}) (*GroupModel, error) {
+	gm := &GroupModel{}
+	if rel, ok := raw["relation"].(string); ok {
+		gm.Relation = types.StringValue(rel)
+	}
+	rawEntries, _ := raw["entries"].([]interface{})
+	for _, rawEntry := range rawEntries {
+		if entryArr, ok := rawEntry.([]interface{}); ok {
+			em, err := apiEntryToModel(entryArr)
+			if err != nil {
+				return nil, err
+			}
+			gm.Entries = append(gm.Entries, em)
+		}
+	}
+	return gm, nil
 }

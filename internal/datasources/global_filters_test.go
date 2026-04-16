@@ -122,3 +122,105 @@ func TestGlobalFiltersDataSource_Read_MultipleFilters(t *testing.T) {
 	})
 	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
 }
+
+// --- Singular GlobalFilterDataSource tests ---
+
+func TestGlobalFilterDataSource_Metadata(t *testing.T) {
+	d := NewGlobalFilterDataSource()
+	req := dsMetadataReq("link11waap")
+	resp := dsMetadataResp()
+	d.Metadata(context.Background(), req, resp)
+	assert.Equal(t, "link11waap_global_filter", resp.TypeName)
+}
+
+func TestGlobalFilterDataSource_Schema(t *testing.T) {
+	d := NewGlobalFilterDataSource()
+	req := dsSchemaReq()
+	resp := dsSchemaResp()
+	d.Schema(context.Background(), req, resp)
+	require.NotNil(t, resp.Schema)
+	assert.Contains(t, resp.Schema.Attributes, "config_id")
+	assert.Contains(t, resp.Schema.Attributes, "name")
+}
+
+func TestGlobalFilterDataSource_Configure_InvalidType(t *testing.T) {
+	testDSConfigureWithInvalidType(t, NewGlobalFilterDataSource())
+}
+
+func TestGlobalFilterDataSource_Configure_Nil(t *testing.T) {
+	testDSConfigureWithNil(t, NewGlobalFilterDataSource())
+}
+
+func TestGlobalFilterDataSource_Read_Success(t *testing.T) {
+	d := NewGlobalFilterDataSource()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.ListResponse[client.GlobalFilter]{
+			Total: 2,
+			Items: []client.GlobalFilter{
+				{
+					ID:          "gf1",
+					Name:        "test-filter",
+					Description: "Test Filter",
+					Source:      "https://example.com/filter.json",
+					Mdate:       "2024-01-01",
+					Active:      true,
+					Tags:        []string{"tag1", "tag2"},
+					Action:      "action-monitor",
+					Rule:        map[string]interface{}{"relation": "OR", "entries": []interface{}{}},
+				},
+				{
+					ID:     "gf2",
+					Name:   "other-filter",
+					Source: "https://example.com/other.json",
+					Active: false,
+				},
+			},
+		})
+	})
+	configureDatasourceWithMock(t, d, handler)
+
+	resp := readDatasource(t, d, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test-filter"),
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+}
+
+func TestGlobalFilterDataSource_Read_NotFound(t *testing.T) {
+	d := NewGlobalFilterDataSource()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.ListResponse[client.GlobalFilter]{
+			Total: 1,
+			Items: []client.GlobalFilter{
+				{
+					ID:     "gf1",
+					Name:   "existing-filter",
+					Source: "https://example.com/filter.json",
+					Active: true,
+				},
+			},
+		})
+	})
+	configureDatasourceWithMock(t, d, handler)
+
+	resp := readDatasource(t, d, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "nonexistent"),
+	})
+	assert.True(t, resp.Diagnostics.HasError())
+}
+
+func TestGlobalFilterDataSource_Read_APIError(t *testing.T) {
+	d := NewGlobalFilterDataSource()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"message":"server error"}`))
+	})
+	configureDatasourceWithMock(t, d, handler)
+
+	resp := readDatasource(t, d, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test-filter"),
+	})
+	assert.True(t, resp.Diagnostics.HasError())
+}
