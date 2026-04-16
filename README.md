@@ -93,6 +93,7 @@ provider "link11waap" {
 | `link11waap_load_balancer_regions` | Configures load balancer region settings |
 | `link11waap_security_policy` | Manages security policies for server groups |
 | `link11waap_backend_service` | Manages backend services for server groups |
+' `link11waap_proxy_template` | Manages proxy templates for server groups |
 | `link11waap_publish` | Triggers configuration publishing to edge nodes |
 | `link11waap_user` | Manages user accounts |
 
