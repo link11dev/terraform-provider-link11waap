@@ -380,6 +380,6 @@ type GlobalFilter struct {
 	Active      bool        `json:"active"`
 	Description string      `json:"description,omitempty"`
 	Tags        []string    `json:"tags,omitempty"`
-	Action      interface{} `json:"action,omitempty"`
+	Action      string      `json:"action,omitempty"`
 	Rule        interface{} `json:"rule,omitempty"`
 }
