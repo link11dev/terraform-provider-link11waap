@@ -3,7 +3,6 @@ package resources
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -93,7 +92,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "The unique identifier for the global filter.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -314,24 +313,11 @@ func (r *GlobalFilterResource) Read(ctx context.Context, req resource.ReadReques
 		state.Tags = types.ListNull(types.StringType)
 	}
 
-	// Action: interface{} -> string
-	if filter.Action != nil {
-		if actionStr, ok := filter.Action.(string); ok {
-			if actionStr == "" {
-				actionStr = "action-monitor"
-			}
-			state.Action = types.StringValue(actionStr)
-		} else {
-			actionBytes, marshalErr := json.Marshal(filter.Action)
-			if marshalErr != nil {
-				resp.Diagnostics.AddError("Error Marshaling Action", marshalErr.Error())
-				return
-			}
-			state.Action = types.StringValue(string(actionBytes))
-		}
-	} else {
-		state.Action = types.StringValue("action-monitor")
+	action := filter.Action
+	if action == "" {
+		action = "action-monitor"
 	}
+	state.Action = types.StringValue(action)
 
 	// Rule: interface{} -> RuleModel
 	ruleModel, parseErr := apiRuleToModel(filter.Rule)

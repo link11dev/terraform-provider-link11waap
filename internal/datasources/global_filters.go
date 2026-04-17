@@ -114,21 +114,7 @@ func (d *GlobalFiltersDataSource) Read(ctx context.Context, req datasource.ReadR
 
 		model.Tags = dsStringSliceToList(ctx, f.Tags, resp)
 
-		// Action: interface{} -> string
-		if f.Action != nil {
-			if actionStr, ok := f.Action.(string); ok {
-				model.Action = types.StringValue(actionStr)
-			} else {
-				actionBytes, marshalErr := json.Marshal(f.Action)
-				if marshalErr != nil {
-					resp.Diagnostics.AddError("Error Marshaling Action", marshalErr.Error())
-					return
-				}
-				model.Action = types.StringValue(string(actionBytes))
-			}
-		} else {
-			model.Action = types.StringValue("")
-		}
+		model.Action = types.StringValue(f.Action)
 
 		// Rule: interface{} -> JSON string
 		if f.Rule != nil {
@@ -273,21 +259,7 @@ func (d *GlobalFilterDataSource) Read(ctx context.Context, req datasource.ReadRe
 
 	data.Tags = dsStringSliceToList(ctx, found.Tags, resp)
 
-	// Action: interface{} -> string
-	if found.Action != nil {
-		if actionStr, ok := found.Action.(string); ok {
-			data.Action = types.StringValue(actionStr)
-		} else {
-			actionBytes, marshalErr := json.Marshal(found.Action)
-			if marshalErr != nil {
-				resp.Diagnostics.AddError("Error Marshaling Action", marshalErr.Error())
-				return
-			}
-			data.Action = types.StringValue(string(actionBytes))
-		}
-	} else {
-		data.Action = types.StringValue("")
-	}
+	data.Action = types.StringValue(found.Action)
 
 	// Rule: interface{} -> JSON string
 	if found.Rule != nil {
