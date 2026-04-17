@@ -96,7 +96,6 @@ resource "link11waap_planet_trusted_nets" "main" {
 
   # Reference to a global filter managed outside of Terraform (data source)
   trusted_nets {
-      address = null
       comment = "Secure CDN Link11 Trusted Source"
       gf_id   = data.link11waap_global_filter.l11_cdn_trusted_source.id
       source  = "global_filter"
