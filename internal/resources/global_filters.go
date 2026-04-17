@@ -93,7 +93,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "The unique identifier for the global filter.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
