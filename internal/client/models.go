@@ -1,6 +1,9 @@
 package client
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ListResponse is a generic list response wrapper
 type ListResponse[T any] struct {
@@ -369,4 +372,38 @@ type EdgeFunction struct {
 	Description string `json:"description,omitempty"`
 	Code        string `json:"code"`
 	Phase       string `json:"phase"`
+}
+
+// GlobalFilter represents a global filter entry in the API
+type GlobalFilter struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Source      string      `json:"source"`
+	Mdate       string      `json:"mdate,omitempty"`
+	Active      bool        `json:"active"`
+	Description string      `json:"description,omitempty"`
+	Tags        []string    `json:"tags,omitempty"`
+	Action      string      `json:"action,omitempty"`
+	Rule        interface{} `json:"rule,omitempty"`
+}
+
+// TrustedNet represents a single trusted network entry inside a Planet.
+type TrustedNet struct {
+	Source  string `json:"source"`
+	Comment string `json:"comment"`
+	Address string `json:"address,omitempty"`
+	GfID    string `json:"gf_id,omitempty"`
+}
+
+// Planet represents a planet entry in the API.
+// The Ichallenge field uses json.RawMessage so the large nested JSON round-trips
+// without requiring Go struct definitions for every sub-field.
+type Planet struct {
+	ID                 string          `json:"id"`
+	Name               string          `json:"name"`
+	TrustedNets        []TrustedNet    `json:"trusted_nets"`
+	Ichallenge         json.RawMessage `json:"ichallenge"`
+	NoHostCertName     string          `json:"no_host_cert_name"`
+	NoHostSSLCiphers   string          `json:"no_host_ssl_ciphers"`
+	NoHostSSLProtocols []string        `json:"no_host_ssl_protocols"`
 }
