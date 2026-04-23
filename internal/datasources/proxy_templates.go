@@ -29,7 +29,7 @@ type ProxyTemplateDataModel struct {
 	Name                          types.String `tfsdk:"name"`
 	Description                   types.String `tfsdk:"description"`
 	ACAOHeader                    types.Bool   `tfsdk:"acao_header"`
-	XFFHeaderName                 types.String `tfsdk:"xff_header_name"`
+	XFFHeaderName                 types.List   `tfsdk:"xff_header_name"`
 	XRealIPHeaderName             types.String `tfsdk:"xrealip_header_name"`
 	ProxyConnectTimeout           types.String `tfsdk:"proxy_connect_timeout"`
 	ProxyReadTimeout              types.String `tfsdk:"proxy_read_timeout"`
@@ -90,7 +90,7 @@ func (d *ProxyTemplatesDataSource) Schema(_ context.Context, _ datasource.Schema
 						"name":                              schema.StringAttribute{Computed: true},
 						"description":                       schema.StringAttribute{Computed: true},
 						"acao_header":                       schema.BoolAttribute{Computed: true},
-						"xff_header_name":                   schema.StringAttribute{Computed: true},
+						"xff_header_name":                   schema.ListAttribute{Computed: true, ElementType: types.StringType},
 						"xrealip_header_name":               schema.StringAttribute{Computed: true},
 						"proxy_connect_timeout":             schema.StringAttribute{Computed: true},
 						"proxy_read_timeout":                schema.StringAttribute{Computed: true},
@@ -155,6 +155,15 @@ func (d *ProxyTemplatesDataSource) Read(ctx context.Context, req datasource.Read
 
 	data.ProxyTemplates = make([]ProxyTemplateDataModel, len(templates))
 	for i, pt := range templates {
+		var xffHeaderNames types.List
+		if pt.XFFHeaderName != nil {
+			xl, diags := types.ListValueFrom(ctx, types.StringType, pt.XFFHeaderName)
+			resp.Diagnostics.Append(diags...)
+			xffHeaderNames = xl
+		} else {
+			xffHeaderNames = types.ListNull(types.StringType)
+		}
+
 		var sslProtocols types.List
 		if pt.SSLProtocols != nil {
 			sl, diags := types.ListValueFrom(ctx, types.StringType, pt.SSLProtocols)
@@ -207,7 +216,7 @@ func (d *ProxyTemplatesDataSource) Read(ctx context.Context, req datasource.Read
 			Name:                          types.StringValue(pt.Name),
 			Description:                   types.StringValue(pt.Description),
 			ACAOHeader:                    types.BoolValue(pt.ACAOHeader),
-			XFFHeaderName:                 types.StringValue(pt.XFFHeaderName),
+			XFFHeaderName:                 xffHeaderNames,
 			XRealIPHeaderName:             types.StringValue(pt.XRealIPHeaderName),
 			ProxyConnectTimeout:           types.StringValue(pt.ProxyConnectTimeout),
 			ProxyReadTimeout:              types.StringValue(pt.ProxyReadTimeout),

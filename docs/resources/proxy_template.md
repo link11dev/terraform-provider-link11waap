@@ -56,7 +56,7 @@ resource "link11waap_proxy_template" "test_proxt_tpl_advanced" {
   ssl_protocols = ["TLSv1.2", "TLSv1.3"]
   proxy_connect_timeout = 600
   acao_header = true
-  xff_header_name = "X-Forwarded-For"
+  xff_header_name = ["X-Forwarded-For"]
   xrealip_header_name = "X-Real-IP"
   proxy_read_timeout = 600
   upstream_host = "$http_host"
@@ -118,9 +118,9 @@ resource "link11waap_proxy_template" "test_proxt_tpl_advanced" {
 - `send_timeout` (String) Send timeout.
 - `ssl_ciphers` (String) SSL cipher suite string.
 - `ssl_conf_specific` (String) SSL-specific nginx directives.
-- `ssl_protocols` (List of String) List of SSL/TLS protocols to enable. Valid values: TLSv1.1, TLSv1.2, TLSv1.3.
+- `ssl_protocols` (List of String) List of SSL/TLS protocols to enable. Valid values: TLSv1.1, TLSv1.2, TLSv1.3, SSLv2, SSLv3, TLSv1.
 - `upstream_host` (String) Upstream host value.
-- `xff_header_name` (String) X-Forwarded-For header name.
+- `xff_header_name` (List of String) X-Forwarded-For header names.
 - `xrealip_header_name` (String) X-Real-IP header name.
 
 ### Read-Only
