@@ -102,11 +102,11 @@ func TestProxyTemplateResource_CRUD_WithFailingClient(t *testing.T) {
 	r := &ProxyTemplateResource{}
 
 	planVals := map[string]tftypes.Value{
-		"config_id":                         tftypes.NewValue(tftypes.String, "cfg1"),
-		"id":                                tftypes.NewValue(tftypes.String, nil),
-		"name":                              tftypes.NewValue(tftypes.String, "test-pt"),
-		"description":                       tftypes.NewValue(tftypes.String, ""),
-		"acao_header":                       tftypes.NewValue(tftypes.Bool, false),
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, nil),
+		"name":        tftypes.NewValue(tftypes.String, "test-pt"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"acao_header": tftypes.NewValue(tftypes.Bool, false),
 		"xff_header_name": tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{
 			tftypes.NewValue(tftypes.String, "X-Forwarded-For"),
 		}),
@@ -145,11 +145,11 @@ func TestProxyTemplateResource_CRUD_WithFailingClient(t *testing.T) {
 	}
 
 	stateVals := map[string]tftypes.Value{
-		"config_id":                         tftypes.NewValue(tftypes.String, "cfg1"),
-		"id":                                tftypes.NewValue(tftypes.String, "pt1"),
-		"name":                              tftypes.NewValue(tftypes.String, "test-pt"),
-		"description":                       tftypes.NewValue(tftypes.String, ""),
-		"acao_header":                       tftypes.NewValue(tftypes.Bool, false),
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, "pt1"),
+		"name":        tftypes.NewValue(tftypes.String, "test-pt"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"acao_header": tftypes.NewValue(tftypes.Bool, false),
 		"xff_header_name": tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{
 			tftypes.NewValue(tftypes.String, "X-Forwarded-For"),
 		}),
