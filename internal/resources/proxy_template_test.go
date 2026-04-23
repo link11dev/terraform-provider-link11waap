@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
@@ -106,7 +107,9 @@ func TestProxyTemplateResource_CRUD_WithFailingClient(t *testing.T) {
 		"name":                              tftypes.NewValue(tftypes.String, "test-pt"),
 		"description":                       tftypes.NewValue(tftypes.String, ""),
 		"acao_header":                       tftypes.NewValue(tftypes.Bool, false),
-		"xff_header_name":                   tftypes.NewValue(tftypes.String, "X-Forwarded-For"),
+		"xff_header_name": tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{
+			tftypes.NewValue(tftypes.String, "X-Forwarded-For"),
+		}),
 		"xrealip_header_name":               tftypes.NewValue(tftypes.String, "X-Real-IP"),
 		"proxy_connect_timeout":             tftypes.NewValue(tftypes.String, "5"),
 		"proxy_read_timeout":                tftypes.NewValue(tftypes.String, "60"),
@@ -147,7 +150,9 @@ func TestProxyTemplateResource_CRUD_WithFailingClient(t *testing.T) {
 		"name":                              tftypes.NewValue(tftypes.String, "test-pt"),
 		"description":                       tftypes.NewValue(tftypes.String, ""),
 		"acao_header":                       tftypes.NewValue(tftypes.Bool, false),
-		"xff_header_name":                   tftypes.NewValue(tftypes.String, "X-Forwarded-For"),
+		"xff_header_name": tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{
+			tftypes.NewValue(tftypes.String, "X-Forwarded-For"),
+		}),
 		"xrealip_header_name":               tftypes.NewValue(tftypes.String, "X-Real-IP"),
 		"proxy_connect_timeout":             tftypes.NewValue(tftypes.String, "5"),
 		"proxy_read_timeout":                tftypes.NewValue(tftypes.String, "60"),
@@ -198,7 +203,7 @@ func TestProxyTemplateResource_Read_WithMock(t *testing.T) {
 			Name:                          "test-pt",
 			Description:                   "A proxy template",
 			ACAOHeader:                    true,
-			XFFHeaderName:                 "X-Forwarded-For",
+			XFFHeaderName:                 []string{"X-Forwarded-For"},
 			XRealIPHeaderName:             "X-Real-IP",
 			ProxyConnectTimeout:           "5",
 			ProxyReadTimeout:              "60",
@@ -239,7 +244,7 @@ func TestProxyTemplateResource_Read_WithMock_SSLProtocols(t *testing.T) {
 		json.NewEncoder(w).Encode(client.ProxyTemplate{
 			ID:                            "pt1",
 			Name:                          "ssl-test",
-			XFFHeaderName:                 "X-Forwarded-For",
+			XFFHeaderName:                 []string{"X-Forwarded-For"},
 			XRealIPHeaderName:             "X-Real-IP",
 			ProxyConnectTimeout:           "5",
 			ProxyReadTimeout:              "60",
@@ -275,7 +280,7 @@ func TestProxyTemplateResource_Read_WithMock_AdvancedConfig(t *testing.T) {
 			json.NewEncoder(w).Encode(client.ProxyTemplate{
 				ID:                            "pt1",
 				Name:                          "adv-test",
-				XFFHeaderName:                 "X-Forwarded-For",
+				XFFHeaderName:                 []string{"X-Forwarded-For"},
 				XRealIPHeaderName:             "X-Real-IP",
 				ProxyConnectTimeout:           "5",
 				ProxyReadTimeout:              "60",
@@ -319,7 +324,7 @@ func TestProxyTemplateResource_Read_WithMock_AdvancedConfig(t *testing.T) {
 			json.NewEncoder(w).Encode(client.ProxyTemplate{
 				ID:                            "pt1",
 				Name:                          "adv-test-nil-proto",
-				XFFHeaderName:                 "X-Forwarded-For",
+				XFFHeaderName:                 []string{"X-Forwarded-For"},
 				XRealIPHeaderName:             "X-Real-IP",
 				ProxyConnectTimeout:           "5",
 				ProxyReadTimeout:              "60",
@@ -411,7 +416,7 @@ func TestProxyTemplateResourceModel_FieldTypes(t *testing.T) {
 		Name:                          types.StringValue("test-pt"),
 		Description:                   types.StringValue("desc"),
 		ACAOHeader:                    types.BoolValue(true),
-		XFFHeaderName:                 types.StringValue("X-Forwarded-For"),
+		XFFHeaderName:                 types.ListValueMust(types.StringType, []attr.Value{types.StringValue("X-Forwarded-For")}),
 		XRealIPHeaderName:             types.StringValue("X-Real-IP"),
 		ProxyConnectTimeout:           types.StringValue("5"),
 		ProxyReadTimeout:              types.StringValue("60"),
@@ -442,7 +447,7 @@ func TestProxyTemplateResourceModel_FieldTypes(t *testing.T) {
 	assert.Equal(t, "test-pt", model.Name.ValueString())
 	assert.Equal(t, "desc", model.Description.ValueString())
 	assert.True(t, model.ACAOHeader.ValueBool())
-	assert.Equal(t, "X-Forwarded-For", model.XFFHeaderName.ValueString())
+	assert.False(t, model.XFFHeaderName.IsNull())
 	assert.Equal(t, "X-Real-IP", model.XRealIPHeaderName.ValueString())
 	assert.False(t, model.CustomListener.ValueBool())
 	assert.True(t, model.SSLProtocols.IsNull())
@@ -459,7 +464,7 @@ func TestBuildProxyTemplateAPIModel_Basic(t *testing.T) {
 		Name:                          types.StringValue("test-pt"),
 		Description:                   types.StringValue("desc"),
 		ACAOHeader:                    types.BoolValue(true),
-		XFFHeaderName:                 types.StringValue("X-Forwarded-For"),
+		XFFHeaderName:                 types.ListValueMust(types.StringType, []attr.Value{types.StringValue("X-Forwarded-For")}),
 		XRealIPHeaderName:             types.StringValue("X-Real-IP"),
 		ProxyConnectTimeout:           types.StringValue("5"),
 		ProxyReadTimeout:              types.StringValue("60"),
@@ -491,7 +496,7 @@ func TestBuildProxyTemplateAPIModel_Basic(t *testing.T) {
 	assert.Equal(t, "test-pt", pt.Name)
 	assert.Equal(t, "desc", pt.Description)
 	assert.True(t, pt.ACAOHeader)
-	assert.Equal(t, "X-Forwarded-For", pt.XFFHeaderName)
+	assert.Equal(t, []string{"X-Forwarded-For"}, pt.XFFHeaderName)
 	assert.Equal(t, "X-Real-IP", pt.XRealIPHeaderName)
 	assert.Equal(t, "5", pt.ProxyConnectTimeout)
 	assert.Equal(t, "60", pt.ProxyReadTimeout)
@@ -528,7 +533,7 @@ func TestBuildProxyTemplateAPIModel_WithSSLProtocols(t *testing.T) {
 		Name:                          types.StringValue("ssl-test"),
 		Description:                   types.StringValue(""),
 		ACAOHeader:                    types.BoolValue(false),
-		XFFHeaderName:                 types.StringValue("X-Forwarded-For"),
+		XFFHeaderName:                 types.ListValueMust(types.StringType, []attr.Value{types.StringValue("X-Forwarded-For")}),
 		XRealIPHeaderName:             types.StringValue("X-Real-IP"),
 		ProxyConnectTimeout:           types.StringValue("5"),
 		ProxyReadTimeout:              types.StringValue("60"),
@@ -583,7 +588,7 @@ func TestBuildProxyTemplateAPIModel_WithAdvancedConfig(t *testing.T) {
 		Name:                          types.StringValue("adv-test"),
 		Description:                   types.StringValue(""),
 		ACAOHeader:                    types.BoolValue(false),
-		XFFHeaderName:                 types.StringValue("X-Forwarded-For"),
+		XFFHeaderName:                 types.ListValueMust(types.StringType, []attr.Value{types.StringValue("X-Forwarded-For")}),
 		XRealIPHeaderName:             types.StringValue("X-Real-IP"),
 		ProxyConnectTimeout:           types.StringValue("5"),
 		ProxyReadTimeout:              types.StringValue("60"),
@@ -626,7 +631,7 @@ func TestBuildProxyTemplateAPIModel_NullSSLProtocols(t *testing.T) {
 		Name:                          types.StringValue("null-ssl"),
 		Description:                   types.StringValue(""),
 		ACAOHeader:                    types.BoolValue(false),
-		XFFHeaderName:                 types.StringValue("X-Forwarded-For"),
+		XFFHeaderName:                 types.ListValueMust(types.StringType, []attr.Value{types.StringValue("X-Forwarded-For")}),
 		XRealIPHeaderName:             types.StringValue("X-Real-IP"),
 		ProxyConnectTimeout:           types.StringValue("5"),
 		ProxyReadTimeout:              types.StringValue("60"),
@@ -665,7 +670,7 @@ func TestBuildProxyTemplateAPIModel_NullAdvancedConfig(t *testing.T) {
 		Name:                          types.StringValue("null-adv"),
 		Description:                   types.StringValue(""),
 		ACAOHeader:                    types.BoolValue(false),
-		XFFHeaderName:                 types.StringValue("X-Forwarded-For"),
+		XFFHeaderName:                 types.ListValueMust(types.StringType, []attr.Value{types.StringValue("X-Forwarded-For")}),
 		XRealIPHeaderName:             types.StringValue("X-Real-IP"),
 		ProxyConnectTimeout:           types.StringValue("5"),
 		ProxyReadTimeout:              types.StringValue("60"),

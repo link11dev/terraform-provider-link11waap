@@ -49,7 +49,7 @@ func TestProxyTemplatesDataSource_Read_Success(t *testing.T) {
 					Name:                          "test-pt",
 					Description:                   "A proxy template",
 					ACAOHeader:                    true,
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "5",
 					ProxyReadTimeout:              "60",
@@ -117,7 +117,7 @@ func TestProxyTemplatesDataSource_Read_MultipleTemplates(t *testing.T) {
 				{
 					ID:                            "pt1",
 					Name:                          "first",
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "5",
 					ProxyReadTimeout:              "60",
@@ -139,7 +139,7 @@ func TestProxyTemplatesDataSource_Read_MultipleTemplates(t *testing.T) {
 				{
 					ID:                            "pt2",
 					Name:                          "second",
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "10",
 					ProxyReadTimeout:              "120",
@@ -178,7 +178,7 @@ func TestProxyTemplatesDataSource_Read_NilSSLProtocols(t *testing.T) {
 				{
 					ID:                            "pt1",
 					Name:                          "nil-ssl",
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "5",
 					ProxyReadTimeout:              "60",
@@ -217,7 +217,7 @@ func TestProxyTemplatesDataSource_Read_NilAdvancedConfig(t *testing.T) {
 				{
 					ID:                            "pt1",
 					Name:                          "nil-adv",
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "5",
 					ProxyReadTimeout:              "60",
@@ -257,7 +257,7 @@ func TestProxyTemplatesDataSource_Read_WithAdvancedConfig(t *testing.T) {
 				{
 					ID:                            "pt1",
 					Name:                          "adv-config",
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "5",
 					ProxyReadTimeout:              "60",
@@ -310,7 +310,7 @@ func TestProxyTemplatesDataSource_Read_WithAdvancedConfig_NilProtocol(t *testing
 				{
 					ID:                            "pt1",
 					Name:                          "adv-nil-proto",
-					XFFHeaderName:                 "X-Forwarded-For",
+					XFFHeaderName:                 []string{"X-Forwarded-For"},
 					XRealIPHeaderName:             "X-Real-IP",
 					ProxyConnectTimeout:           "5",
 					ProxyReadTimeout:              "60",

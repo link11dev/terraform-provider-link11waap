@@ -41,7 +41,7 @@ resource "link11waap_proxy_template" "test_proxt_tpl_advanced" {
   ssl_protocols = ["TLSv1.2", "TLSv1.3"]
   proxy_connect_timeout = 600
   acao_header = true
-  xff_header_name = "X-Forwarded-For"
+  xff_header_name = ["X-Forwarded-For"]
   xrealip_header_name = "X-Real-IP"
   proxy_read_timeout = 600
   upstream_host = "$http_host"

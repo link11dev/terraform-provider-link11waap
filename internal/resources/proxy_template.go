@@ -39,7 +39,7 @@ type ProxyTemplateResourceModel struct {
 	Name                          types.String `tfsdk:"name"`
 	Description                   types.String `tfsdk:"description"`
 	ACAOHeader                    types.Bool   `tfsdk:"acao_header"`
-	XFFHeaderName                 types.String `tfsdk:"xff_header_name"`
+	XFFHeaderName                 types.List   `tfsdk:"xff_header_name"`
 	XRealIPHeaderName             types.String `tfsdk:"xrealip_header_name"`
 	ProxyConnectTimeout           types.String `tfsdk:"proxy_connect_timeout"`
 	ProxyReadTimeout              types.String `tfsdk:"proxy_read_timeout"`
@@ -119,11 +119,17 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
-			"xff_header_name": schema.StringAttribute{
-				Description: "X-Forwarded-For header name.",
+			"xff_header_name": schema.ListAttribute{
+				Description: "X-Forwarded-For header names.",
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString("X-Forwarded-For"),
+				ElementType: types.StringType,
+				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{
+					types.StringValue("X-Forwarded-For"),
+				})),
+				Validators: []validator.List{
+					listvalidator.SizeBetween(1, 5),
+				},
 			},
 			"xrealip_header_name": schema.StringAttribute{
 				Description: "X-Real-IP header name.",
@@ -252,7 +258,7 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 				Default:     stringdefault.StaticString("ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:!SHA1:!SHA256:!SHA384:!DSS:!aNULL"),
 			},
 			"ssl_protocols": schema.ListAttribute{
-				Description: "List of SSL/TLS protocols to enable. Valid values: TLSv1.1, TLSv1.2, TLSv1.3.",
+				Description: "List of SSL/TLS protocols to enable. Valid values: TLSv1.1, TLSv1.2, TLSv1.3, SSLv2, SSLv3, TLSv1.",
 				Optional:    true,
 				Computed:    true,
 				ElementType: types.StringType,
@@ -263,7 +269,7 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 				Validators: []validator.List{
 					listvalidator.SizeAtLeast(1),
 					listvalidator.ValueStringsAre(
-						stringvalidator.OneOf("TLSv1.1", "TLSv1.2", "TLSv1.3"),
+						stringvalidator.OneOf("TLSv1.1", "TLSv1.2", "TLSv1.3", "SSLv2", "SSLv3", "TLSv1"),
 					),
 				},
 			},
@@ -283,6 +289,12 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 							Description: "Protocols for which config applies. Valid values: http, https.",
 							Required:    true,
 							ElementType: types.StringType,
+							Validators: []validator.List{
+								listvalidator.SizeAtLeast(1),
+								listvalidator.ValueStringsAre(
+									stringvalidator.OneOf("http", "https"),
+								),
+							},
 						},
 						"configuration": schema.StringAttribute{
 							Description: "Custom nginx configuration lines.",
@@ -357,7 +369,13 @@ func (r *ProxyTemplateResource) Read(ctx context.Context, req resource.ReadReque
 	state.Name = types.StringValue(pt.Name)
 	state.Description = types.StringValue(pt.Description)
 	state.ACAOHeader = types.BoolValue(pt.ACAOHeader)
-	state.XFFHeaderName = types.StringValue(pt.XFFHeaderName)
+	if pt.XFFHeaderName != nil {
+		xffList, diags := types.ListValueFrom(ctx, types.StringType, pt.XFFHeaderName)
+		resp.Diagnostics.Append(diags...)
+		state.XFFHeaderName = xffList
+	} else {
+		state.XFFHeaderName = types.ListNull(types.StringType)
+	}
 	state.XRealIPHeaderName = types.StringValue(pt.XRealIPHeaderName)
 	state.ProxyConnectTimeout = types.StringValue(pt.ProxyConnectTimeout)
 	state.ProxyReadTimeout = types.StringValue(pt.ProxyReadTimeout)
@@ -483,7 +501,6 @@ func buildProxyTemplateAPIModel(ctx context.Context, plan *ProxyTemplateResource
 		Name:                          plan.Name.ValueString(),
 		Description:                   plan.Description.ValueString(),
 		ACAOHeader:                    plan.ACAOHeader.ValueBool(),
-		XFFHeaderName:                 plan.XFFHeaderName.ValueString(),
 		XRealIPHeaderName:             plan.XRealIPHeaderName.ValueString(),
 		ProxyConnectTimeout:           plan.ProxyConnectTimeout.ValueString(),
 		ProxyReadTimeout:              plan.ProxyReadTimeout.ValueString(),
@@ -505,6 +522,11 @@ func buildProxyTemplateAPIModel(ctx context.Context, plan *ProxyTemplateResource
 		ConfSpecific:                  plan.ConfSpecific.ValueString(),
 		SSLConfSpecific:               plan.SSLConfSpecific.ValueString(),
 		SSLCiphers:                    plan.SSLCiphers.ValueString(),
+	}
+
+	// XFF Header Names
+	if !plan.XFFHeaderName.IsNull() && !plan.XFFHeaderName.IsUnknown() {
+		plan.XFFHeaderName.ElementsAs(ctx, &pt.XFFHeaderName, false)
 	}
 
 	// SSL Protocols

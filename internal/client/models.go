@@ -212,7 +212,7 @@ type ProxyTemplate struct {
 	Name                          string                        `json:"name"`
 	Description                   string                        `json:"description,omitempty"`
 	ACAOHeader                    bool                          `json:"acao_header"`
-	XFFHeaderName                 string                        `json:"xff_header_name"`
+	XFFHeaderName                 []string                      `json:"xff_header_name"`
 	XRealIPHeaderName             string                        `json:"xrealip_header_name"`
 	ProxyConnectTimeout           string                        `json:"proxy_connect_timeout"`
 	ProxyReadTimeout              string                        `json:"proxy_read_timeout"`
