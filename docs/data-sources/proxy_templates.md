@@ -71,7 +71,7 @@ Read-Only:
 - `ssl_conf_specific` (String)
 - `ssl_protocols` (List of String)
 - `upstream_host` (String)
-- `xff_header_name` (String)
+- `xff_header_name` (List of String)
 - `xrealip_header_name` (String)
 
 <a id="nestedatt--proxy_templates--advanced_configuration"></a>
