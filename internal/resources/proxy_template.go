@@ -100,7 +100,7 @@ func (r *ProxyTemplateResource) Schema(_ context.Context, _ resource.SchemaReque
 				Description: "The unique identifier for the proxy template.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{

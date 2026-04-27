@@ -90,7 +90,7 @@ func (r *BackendServiceResource) Schema(_ context.Context, _ resource.SchemaRequ
 				Description: "The unique identifier for the backend service.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{

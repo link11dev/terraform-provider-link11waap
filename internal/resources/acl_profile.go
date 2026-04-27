@@ -71,7 +71,7 @@ func (r *ACLProfileResource) Schema(_ context.Context, _ resource.SchemaRequest,
 				Description: "The unique identifier for the ACL profile.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{

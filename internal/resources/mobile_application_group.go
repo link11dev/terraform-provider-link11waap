@@ -81,7 +81,7 @@ func (r *MobileApplicationGroupResource) Schema(_ context.Context, _ resource.Sc
 				Description: "The unique identifier for the mobile application group.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{

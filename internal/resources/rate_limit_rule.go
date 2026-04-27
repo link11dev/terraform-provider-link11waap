@@ -101,7 +101,7 @@ func (r *RateLimitRuleResource) Schema(_ context.Context, _ resource.SchemaReque
 				Description: "The unique identifier for the rate limit rule.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
