@@ -91,7 +91,6 @@ func (r *SecurityPolicyResource) Schema(_ context.Context, _ resource.SchemaRequ
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{

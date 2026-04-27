@@ -64,7 +64,7 @@ func (r *EdgeFunctionResource) Schema(_ context.Context, _ resource.SchemaReques
 				Description: "The unique identifier for the edge function.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{

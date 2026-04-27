@@ -71,7 +71,7 @@ func (r *ServerGroupResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Description: "The unique identifier for the server group.",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{

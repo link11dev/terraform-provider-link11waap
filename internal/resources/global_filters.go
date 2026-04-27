@@ -108,10 +108,16 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 			"source": schema.StringAttribute{
 				Description: "The source of the global filter (always self-managed for user-created filters).",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"mdate": schema.StringAttribute{
 				Description: "The last modification date (server-managed).",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"active": schema.BoolAttribute{
 				Description: "Whether the global filter is active.",
