@@ -7,9 +7,9 @@ resource "link11waap_acl_profile" "web" {
   name        = "Web ACL Profile"
   description = "ACL profile for web traffic"
 
-  # Default action when a request matches a deny rule.
-  # Valid values: action-acl-block, action-waap-feed-block, action-https-redirect
-  action = "action-acl-block"
+  # The ID of the action that is performed when a request matches a tag
+  # in Enforce Deny or Block / Apply, or the requestor fails a bot challenge.
+  action = "123a1bc01c3a"
 
   # Optional: tags for categorization
   # tags = ["web", "production"]
