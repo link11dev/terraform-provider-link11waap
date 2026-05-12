@@ -134,7 +134,7 @@ func TestACLProfileResourceModel_FieldTypes(t *testing.T) {
 		ID:          types.StringValue("id1"),
 		Name:        types.StringValue("test-acl"),
 		Description: types.StringValue("desc"),
-		Action:      types.StringValue("action-acl-block"),
+		Action:      types.StringValue("703c7a701c2e"),
 		Tags:        types.ListNull(types.StringType),
 		Allow:       types.ListNull(types.StringType),
 		AllowBot:    types.ListNull(types.StringType),
@@ -148,6 +148,6 @@ func TestACLProfileResourceModel_FieldTypes(t *testing.T) {
 	assert.Equal(t, "id1", model.ID.ValueString())
 	assert.Equal(t, "test-acl", model.Name.ValueString())
 	assert.Equal(t, "desc", model.Description.ValueString())
-	assert.Equal(t, "action-acl-block", model.Action.ValueString())
+	assert.Equal(t, "703c7a701c2e", model.Action.ValueString())
 	assert.True(t, model.Tags.IsNull())
 }
