@@ -108,6 +108,45 @@ func TestCreateServerGroup_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestCreateServerGroup_MobileApplicationGroup_DefaultsToEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		val, exists := payload["mobile_application_group"]
+		assert.True(t, exists, "mobile_application_group must be present in payload")
+		assert.Equal(t, "", val)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server)
+	err := c.CreateServerGroup(context.Background(), "cfg1", "sg1", &ServerGroupCreateRequest{
+		ID:   "sg1",
+		Name: "site1",
+	})
+	require.NoError(t, err)
+}
+
+func TestCreateServerGroup_MobileApplicationGroup_UsesProvidedValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "mag-123", payload["mobile_application_group"])
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server)
+	err := c.CreateServerGroup(context.Background(), "cfg1", "sg1", &ServerGroupCreateRequest{
+		ID:                     "sg1",
+		Name:                   "site1",
+		MobileApplicationGroup: "mag-123",
+	})
+	require.NoError(t, err)
+}
+
 func TestCreateServerGroup_Error(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -129,6 +168,41 @@ func TestUpdateServerGroup_Success(t *testing.T) {
 
 	c := newTestClient(t, server)
 	err := c.UpdateServerGroup(context.Background(), "cfg1", "sg1", &ServerGroupCreateRequest{ID: "sg1"})
+	require.NoError(t, err)
+}
+
+func TestUpdateServerGroup_MobileApplicationGroup_DefaultsToEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		val, exists := payload["mobile_application_group"]
+		assert.True(t, exists, "mobile_application_group must be present in payload")
+		assert.Equal(t, "", val)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server)
+	err := c.UpdateServerGroup(context.Background(), "cfg1", "sg1", &ServerGroupCreateRequest{ID: "sg1"})
+	require.NoError(t, err)
+}
+
+func TestUpdateServerGroup_MobileApplicationGroup_UsesProvidedValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		assert.Equal(t, "mag-456", payload["mobile_application_group"])
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server)
+	err := c.UpdateServerGroup(context.Background(), "cfg1", "sg1", &ServerGroupCreateRequest{
+		ID:                     "sg1",
+		MobileApplicationGroup: "mag-456",
+	})
 	require.NoError(t, err)
 }
 

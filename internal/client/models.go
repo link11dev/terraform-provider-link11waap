@@ -53,7 +53,7 @@ type ServerGroupCreateRequest struct {
 	SSLCertificate         string   `json:"ssl_certificate,omitempty"`
 	ClientCertificate      string   `json:"client_certificate,omitempty"`
 	ClientCertificateMode  string   `json:"client_certificate_mode,omitempty"`
-	MobileApplicationGroup string   `json:"mobile_application_group,omitempty"`
+	MobileApplicationGroup string   `json:"mobile_application_group"`
 }
 
 // ProviderLink represents a cloud provider link for a certificate

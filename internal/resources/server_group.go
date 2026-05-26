@@ -115,7 +115,7 @@ func (r *ServerGroupResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 			"ssl_certificate": schema.StringAttribute{
 				Description: "ID of SSL certificate attached to site.",
-				Optional:    true,
+				Required:    true,
 			},
 			"client_certificate": schema.StringAttribute{
 				Description: "ID of SSL client CA certificate attached to site.",
@@ -133,6 +133,8 @@ func (r *ServerGroupResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"mobile_application_group": schema.StringAttribute{
 				Description: "ID of Mobile Application Group used for site.",
 				Optional:    true,
+				Computed:    true,
+				Default:     stringdefault.StaticString(""),
 			},
 		},
 	}
@@ -220,11 +222,7 @@ func (r *ServerGroupResource) Read(ctx context.Context, req resource.ReadRequest
 	resp.Diagnostics.Append(diags...)
 	state.ServerNames = serverNames
 
-	if sg.SSLCertificate != "" {
-		state.SSLCertificate = types.StringValue(sg.SSLCertificate)
-	} else {
-		state.SSLCertificate = types.StringNull()
-	}
+	state.SSLCertificate = types.StringValue(sg.SSLCertificate)
 	if sg.ClientCertificate != "" {
 		state.ClientCertificate = types.StringValue(sg.ClientCertificate)
 	} else {
@@ -233,11 +231,7 @@ func (r *ServerGroupResource) Read(ctx context.Context, req resource.ReadRequest
 	if sg.ClientCertificateMode != "" {
 		state.ClientCertificateMode = types.StringValue(sg.ClientCertificateMode)
 	}
-	if sg.MobileApplicationGroup != "" {
-		state.MobileApplicationGroup = types.StringValue(sg.MobileApplicationGroup)
-	} else {
-		state.MobileApplicationGroup = types.StringNull()
-	}
+	state.MobileApplicationGroup = types.StringValue(sg.MobileApplicationGroup)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

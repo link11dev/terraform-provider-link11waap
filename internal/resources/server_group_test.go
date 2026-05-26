@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -35,8 +36,8 @@ func TestServerGroupResource_Schema(t *testing.T) {
 	resp := schemaResp()
 	r.Schema(ctx, req, resp)
 
-	schema := resp.Schema
-	assert.NotEmpty(t, schema.Attributes)
+	s := resp.Schema
+	assert.NotEmpty(t, s.Attributes)
 
 	expectedAttrs := []string{
 		"config_id", "id", "name", "description", "server_names",
@@ -45,9 +46,15 @@ func TestServerGroupResource_Schema(t *testing.T) {
 		"client_certificate_mode", "mobile_application_group",
 	}
 	for _, attr := range expectedAttrs {
-		_, ok := schema.Attributes[attr]
+		_, ok := s.Attributes[attr]
 		assert.True(t, ok, "expected attribute %q in schema", attr)
 	}
+
+	sslCertAttr, ok := s.Attributes["ssl_certificate"]
+	require.True(t, ok)
+	sslCertStringAttr, ok := sslCertAttr.(schema.StringAttribute)
+	require.True(t, ok)
+	assert.True(t, sslCertStringAttr.Required)
 }
 
 func TestServerGroupResource_Configure_NilProvider(t *testing.T) {
