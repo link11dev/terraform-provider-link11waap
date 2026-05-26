@@ -17,14 +17,6 @@ Manages a Server Group (site/domain) in Link11 WAAP.
 
 data "link11waap_config" "main" {}
 
-# First, upload a certificate for the server group
-resource "link11waap_certificate" "web" {
-  config_id   = data.link11waap_config.main.id
-  cert_body   = file("${path.module}/certs/cert.pem")
-  private_key = file("${path.module}/certs/key.pem")
-  side        = "server"
-}
-
 # Basic server group using default policies
 resource "link11waap_server_group" "example" {
   config_id                = data.link11waap_config.main.id
@@ -36,7 +28,9 @@ resource "link11waap_server_group" "example" {
   # And here we use the default proxy template provided by Link11 for completeness
   proxy_template           = "__default__"
   challenge_cookie_domain  = "$host"
-  ssl_certificate          = link11waap_certificate.web.id
+  # "placeholder" is the name of the default certificate provided by Link11,
+  # which is used when no custom certificate is specified
+  ssl_certificate          = "placeholder"
   mobile_application_group = "__default__"
 
   # Optional: client certificate mode for mTLS. Valid values: on, off, optional
@@ -47,6 +41,16 @@ resource "link11waap_server_group" "example" {
 }
 
 # Server group with a custom security policy and mobile application group
+
+# First, upload a certificate for the server group
+resource "link11waap_certificate" "web" {
+  config_id   = data.link11waap_config.main.id
+  cert_body   = file("${path.module}/certs/cert.pem")
+  private_key = file("${path.module}/certs/key.pem")
+  side        = "server"
+}
+
+
 resource "link11waap_server_group" "advanced" {
   config_id                = data.link11waap_config.main.id
   name                     = "Advanced Website"
@@ -74,6 +78,7 @@ resource "link11waap_server_group" "advanced" {
 - `proxy_template` (String) ID of proxy template used for site.
 - `security_policy` (String) ID of security policy applied on site.
 - `server_names` (List of String) Host names corresponding to the site.
+- `ssl_certificate` (String) ID of SSL certificate attached to site.
 
 ### Optional
 
@@ -82,7 +87,6 @@ resource "link11waap_server_group" "advanced" {
 - `description` (String) Description of the server group.
 - `mobile_application_group` (String) ID of Mobile Application Group used for site.
 - `routing_profile` (String) ID of routing profile used for site.
-- `ssl_certificate` (String) ID of SSL certificate attached to site.
 
 ### Read-Only
 
