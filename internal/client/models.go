@@ -387,6 +387,23 @@ type ContentFilterRule struct {
 	Tags        []string `json:"tags,omitempty"`
 }
 
+// Action represents an action in the API.
+type Action struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Type        string        `json:"type"`
+	Tags        []string      `json:"tags,omitempty"`
+	Params      *ActionParams `json:"params,omitempty"`
+}
+
+// ActionParams represents the params block of an action.
+type ActionParams struct {
+	Content string            `json:"content,omitempty"`
+	Status  *int              `json:"status,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 // GlobalFilter represents a global filter entry in the API
 type GlobalFilter struct {
 	ID          string      `json:"id"`
