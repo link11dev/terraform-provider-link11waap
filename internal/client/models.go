@@ -374,6 +374,19 @@ type EdgeFunction struct {
 	Phase       string `json:"phase"`
 }
 
+// ContentFilterRule represents a content filter rule in the API
+type ContentFilterRule struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Msg         string   `json:"msg"`
+	Operand     string   `json:"operand"`
+	Category    string   `json:"category"`
+	Subcategory string   `json:"subcategory"`
+	Risk        int      `json:"risk"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+}
+
 // GlobalFilter represents a global filter entry in the API
 type GlobalFilter struct {
 	ID          string      `json:"id"`
