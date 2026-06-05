@@ -50,7 +50,6 @@ func (c *Client) GetAction(ctx context.Context, configID, entryID string) (*Acti
 }
 
 // CreateAction creates a new action.
-// NOTE: the single-Action POST returns HTTP 200, unlike edge functions (201).
 func (c *Client) CreateAction(ctx context.Context, configID, entryID string, a *Action) error {
 	path := fmt.Sprintf("/conf/%s/actions/%s", configID, entryID)
 
@@ -65,7 +64,7 @@ func (c *Client) CreateAction(ctx context.Context, configID, entryID string, a *
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated {
 		return ParseErrorResponse(resp)
 	}
 

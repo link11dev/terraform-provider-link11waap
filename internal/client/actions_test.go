@@ -111,7 +111,6 @@ func TestGetAction_InvalidJSON(t *testing.T) {
 }
 
 func TestCreateAction_Success(t *testing.T) {
-	// NOTE: single-Action POST must succeed on HTTP 200, not 201.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/conf/cfg1/actions/a1", r.URL.Path)
@@ -121,7 +120,8 @@ func TestCreateAction_Success(t *testing.T) {
 		assert.Equal(t, "a1", a.ID)
 		assert.Equal(t, "monitor", a.Type)
 		assert.Equal(t, []string{"t1"}, a.Tags)
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"message":"Successfully created entry"}`))
 	}))
 	defer server.Close()
 
@@ -133,19 +133,6 @@ func TestCreateAction_Success(t *testing.T) {
 		Tags: []string{"t1"},
 	})
 	require.NoError(t, err)
-}
-
-func TestCreateAction_Rejects201(t *testing.T) {
-	// The single-entry POST returns 200 on success; 201 should be treated as an error.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"message":"unexpected"}`))
-	}))
-	defer server.Close()
-
-	c := newTestClient(t, server)
-	err := c.CreateAction(context.Background(), "cfg1", "a1", &Action{ID: "a1"})
-	require.Error(t, err)
 }
 
 func TestCreateAction_Error(t *testing.T) {
