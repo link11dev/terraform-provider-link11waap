@@ -17,3 +17,13 @@ output "content_filter_rule_names" {
 output "high_risk_rules" {
   value = [for rule in data.link11waap_content_filter_rules.all.content_filter_rules : rule if rule.risk >= 4]
 }
+
+# Example: Get a specific content filter rule by name
+data "link11waap_content_filter_rules" "example_by_name" {
+  config_id = data.link11waap_config.main.id
+  name      = "Name of a specific content filter rule"
+}
+
+output "example_by_name" {
+  value = data.link11waap_content_filter_rules.example_by_name
+}
