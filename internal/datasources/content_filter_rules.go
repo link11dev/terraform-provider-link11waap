@@ -20,6 +20,7 @@ type ContentFilterRulesDataSource struct {
 // ContentFilterRulesDataSourceModel describes the data source model for content filter rules.
 type ContentFilterRulesDataSourceModel struct {
 	ConfigID           types.String                 `tfsdk:"config_id"`
+	Name               types.String                 `tfsdk:"name"`
 	ContentFilterRules []ContentFilterRuleDataModel `tfsdk:"content_filter_rules"`
 }
 
@@ -55,6 +56,10 @@ func (d *ContentFilterRulesDataSource) Schema(_ context.Context, _ datasource.Sc
 				Description: "Configuration ID.",
 				Required:    true,
 			},
+			"name": schema.StringAttribute{
+				Description: "Rule name. If specified, only the rule with this name will be returned.",
+				Optional:    true,
+			},
 			"content_filter_rules": schema.ListNestedAttribute{
 				Description: "List of content filter rules.",
 				Computed:    true,
@@ -89,13 +94,32 @@ func (d *ContentFilterRulesDataSource) Read(ctx context.Context, req datasource.
 		return
 	}
 
-	rules, err := d.client.ListContentFilterRules(ctx, data.ConfigID.ValueString())
+	allRules, err := d.client.ListContentFilterRules(ctx, data.ConfigID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Error Reading Content Filter Rules",
 			"Could not read content filter rules: "+err.Error(),
 		)
 		return
+	}
+
+	rules := allRules
+	if !data.Name.IsNull() && !data.Name.IsUnknown() {
+		name := data.Name.ValueString()
+		rules = nil
+		for _, r := range allRules {
+			if r.Name == name {
+				rules = []client.ContentFilterRule{r}
+				break
+			}
+		}
+		if len(rules) == 0 {
+			resp.Diagnostics.AddError(
+				"Content Filter Rule Not Found",
+				"No content filter rule found with name: "+name,
+			)
+			return
+		}
 	}
 
 	data.ContentFilterRules = make([]ContentFilterRuleDataModel, len(rules))
