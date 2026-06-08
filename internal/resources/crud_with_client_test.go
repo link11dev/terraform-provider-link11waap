@@ -358,6 +358,102 @@ func TestActionResource_CRUD_WithFailingClient(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, stateVals) })
 }
 
+// --- Content Filter Profile with client ---
+
+// cfSectionTfType returns the tftypes.Object type for a profile section.
+func cfSectionTfType() tftypes.Object {
+	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"key":                 tftypes.String,
+		"reg":                 tftypes.String,
+		"restrict":            tftypes.Bool,
+		"mask":                tftypes.Bool,
+		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
+		"domain":              tftypes.String,
+		"path":                tftypes.String,
+		"case_insensitive":    tftypes.Bool,
+		"active":              tftypes.Bool,
+	}}
+	entryList := tftypes.List{ElementType: entryType}
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"max_count":         tftypes.Number,
+		"max_length":        tftypes.Number,
+		"enable_max_count":  tftypes.Bool,
+		"enable_max_length": tftypes.Bool,
+		"names":             entryList,
+		"regex":             entryList,
+		"text":              entryList,
+	}}
+}
+
+// cfSectionTfValue returns a zero-value tftypes.Value for a profile section.
+func cfSectionTfValue() tftypes.Value {
+	st := cfSectionTfType()
+	entryList := st.AttributeTypes["names"]
+	return tftypes.NewValue(st, map[string]tftypes.Value{
+		"max_count":         tftypes.NewValue(tftypes.Number, 0),
+		"max_length":        tftypes.NewValue(tftypes.Number, 0),
+		"enable_max_count":  tftypes.NewValue(tftypes.Bool, false),
+		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
+		"names":             tftypes.NewValue(entryList, nil),
+		"regex":             tftypes.NewValue(entryList, nil),
+		"text":              tftypes.NewValue(entryList, nil),
+	})
+}
+
+func cfDecodingTfValue() tftypes.Value {
+	dt := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"base64":  tftypes.Bool,
+		"dual":    tftypes.Bool,
+		"html":    tftypes.Bool,
+		"unicode": tftypes.Bool,
+	}}
+	return tftypes.NewValue(dt, map[string]tftypes.Value{
+		"base64":  tftypes.NewValue(tftypes.Bool, true),
+		"dual":    tftypes.NewValue(tftypes.Bool, false),
+		"html":    tftypes.NewValue(tftypes.Bool, false),
+		"unicode": tftypes.NewValue(tftypes.Bool, false),
+	})
+}
+
+func TestContentFilterProfileResource_CRUD_WithFailingClient(t *testing.T) {
+	r := &ContentFilterProfileResource{}
+
+	base := map[string]tftypes.Value{
+		"config_id":       tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":            tftypes.NewValue(tftypes.String, "test-profile"),
+		"description":     tftypes.NewValue(tftypes.String, ""),
+		"ignore_alphanum": tftypes.NewValue(tftypes.Bool, false),
+		"masking_seed":    tftypes.NewValue(tftypes.String, "seed"),
+		"graphql_path":    tftypes.NewValue(tftypes.String, ""),
+		"ignore_body":     tftypes.NewValue(tftypes.Bool, false),
+		"action":          tftypes.NewValue(tftypes.String, ""),
+		"args":            cfSectionTfValue(),
+		"headers":         cfSectionTfValue(),
+		"cookies":         cfSectionTfValue(),
+		"path":            cfSectionTfValue(),
+		"url":             cfSectionTfValue(),
+		"allsections":     cfSectionTfValue(),
+		"decoding":        cfDecodingTfValue(),
+	}
+
+	createVals := make(map[string]tftypes.Value)
+	for k, v := range base {
+		createVals[k] = v
+	}
+	createVals["id"] = tftypes.NewValue(tftypes.String, nil)
+
+	stateVals := make(map[string]tftypes.Value)
+	for k, v := range base {
+		stateVals[k] = v
+	}
+	stateVals["id"] = tftypes.NewValue(tftypes.String, "cfp1")
+
+	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, createVals) })
+	t.Run("Read", func(t *testing.T) { crudReadWithClient(t, r, stateVals) })
+	t.Run("Update", func(t *testing.T) { crudUpdateWithClient(t, r, stateVals) })
+	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, stateVals) })
+}
+
 // --- Load Balancer Regions with client ---
 
 func TestLoadBalancerRegionsResource_CRUD_WithFailingClient(t *testing.T) {

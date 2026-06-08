@@ -134,6 +134,7 @@ func (p *Link11WaapProvider) Resources(_ context.Context) []func() resource.Reso
 		resources.NewPlanetTrustedNetsResource,
 		resources.NewContentFilterRuleResource,
 		resources.NewActionResource,
+		resources.NewContentFilterProfileResource,
 	}
 }
 
@@ -159,5 +160,6 @@ func (p *Link11WaapProvider) DataSources(_ context.Context) []func() datasource.
 		datasources.NewPlanetTrustedNetsDataSource,
 		datasources.NewContentFilterRulesDataSource,
 		datasources.NewActionsDataSource,
+		datasources.NewContentFilterProfilesDataSource,
 	}
 }
