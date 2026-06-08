@@ -865,6 +865,92 @@ func TestLoadBalancerCertificateResource_Read_CertMatchedByURLSuffix(t *testing.
 	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
 }
 
+// --- Action Read ---
+
+func TestActionResource_Read_WithMock(t *testing.T) {
+	r := &ActionResource{}
+	status := 403
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.Action{
+			ID:          "action1",
+			Name:        "test-action",
+			Description: "block bad requests",
+			Type:        "block",
+			Tags:        []string{"tag1", "tag2"},
+			Params: &client.ActionParams{
+				Content: "blocked",
+				Status:  &status,
+				Headers: map[string]string{"X-Blocked": "true"},
+			},
+		})
+	})
+	configureResourceWithMock(t, r, handler)
+
+	resp := readWithMock(t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "action1"),
+	})
+
+	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+}
+
+func TestActionResource_Read_NoParams(t *testing.T) {
+	r := &ActionResource{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.Action{
+			ID:   "action1",
+			Name: "test-action",
+			Type: "skip",
+		})
+	})
+	configureResourceWithMock(t, r, handler)
+
+	resp := readWithMock(t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "action1"),
+	})
+
+	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+}
+
+func TestActionResource_Read_ParamsNoStatusNoHeaders(t *testing.T) {
+	r := &ActionResource{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.Action{
+			ID:   "action1",
+			Name: "test-action",
+			Type: "block",
+			Params: &client.ActionParams{
+				Content: "blocked",
+			},
+		})
+	})
+	configureResourceWithMock(t, r, handler)
+
+	resp := readWithMock(t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "action1"),
+	})
+
+	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+}
+
+func TestActionResource_Read_NotFound(t *testing.T) {
+	r := &ActionResource{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"not found"}`))
+	})
+	configureResourceWithMock(t, r, handler)
+
+	resp := readWithMock(t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "missing"),
+	})
+
+	assert.False(t, resp.Diagnostics.HasError(), "not found should remove resource without error")
+}
+
 // --- Load Balancer Certificate Read - cert matched in DefaultCertificate ---
 
 func TestLoadBalancerCertificateResource_Read_DefaultCertMatch(t *testing.T) {

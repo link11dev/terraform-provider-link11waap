@@ -333,6 +333,31 @@ func TestLoadBalancerCertificateResource_CRUD_WithFailingClient(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, vals) })
 }
 
+// --- Action with client ---
+
+func TestActionResource_CRUD_WithFailingClient(t *testing.T) {
+	r := &ActionResource{}
+	createVals := map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, nil),
+		"name":        tftypes.NewValue(tftypes.String, "test-action"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"type":        tftypes.NewValue(tftypes.String, "block"),
+	}
+	stateVals := map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, "action1"),
+		"name":        tftypes.NewValue(tftypes.String, "test-action"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"type":        tftypes.NewValue(tftypes.String, "block"),
+	}
+
+	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, createVals) })
+	t.Run("Read", func(t *testing.T) { crudReadWithClient(t, r, stateVals) })
+	t.Run("Update", func(t *testing.T) { crudUpdateWithClient(t, r, stateVals) })
+	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, stateVals) })
+}
+
 // --- Load Balancer Regions with client ---
 
 func TestLoadBalancerRegionsResource_CRUD_WithFailingClient(t *testing.T) {
