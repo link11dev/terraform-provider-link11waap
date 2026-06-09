@@ -555,19 +555,17 @@ func buildStringList(ctx context.Context, list types.List, dst *[]string, diags 
 }
 
 // buildSection converts a section object into the client struct.
-// useText selects whether the section uses the "text" entry list (url) or "names" (all others).
-// Only the relevant list is sent; the other is left nil so it is omitted from JSON.
+// useText additionally populates the "text" entry list (url section); all sections always include "names".
 func buildSection(ctx context.Context, obj types.Object, useText bool, diags *diag.Diagnostics) client.ContentFilterProfileSection {
 	if obj.IsNull() || obj.IsUnknown() {
 		section := client.ContentFilterProfileSection{
 			MaxCount:  1,
 			MaxLength: 1024,
+			Names:     []client.ContentFilterEntryMatch{},
 			Regex:     []client.ContentFilterEntryMatch{},
 		}
 		if useText {
 			section.Text = []client.ContentFilterEntryMatch{}
-		} else {
-			section.Names = []client.ContentFilterEntryMatch{}
 		}
 		return section
 	}
@@ -582,17 +580,17 @@ func buildSection(ctx context.Context, obj types.Object, useText bool, diags *di
 		EnableMaxLength: sm.EnableMaxLength.ValueBool(),
 	}
 
+	if names := buildEntryMatches(ctx, sm.Names, "names", diags); names != nil {
+		section.Names = names
+	} else {
+		section.Names = []client.ContentFilterEntryMatch{}
+	}
+
 	if useText {
 		if text := buildEntryMatches(ctx, sm.Text, "text", diags); text != nil {
 			section.Text = text
 		} else {
 			section.Text = []client.ContentFilterEntryMatch{}
-		}
-	} else {
-		if names := buildEntryMatches(ctx, sm.Names, "names", diags); names != nil {
-			section.Names = names
-		} else {
-			section.Names = []client.ContentFilterEntryMatch{}
 		}
 	}
 
