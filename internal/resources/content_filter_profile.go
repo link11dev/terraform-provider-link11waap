@@ -536,12 +536,12 @@ func (r *ContentFilterProfileResource) buildProfile(ctx context.Context, plan *C
 	buildStringList(ctx, plan.Ignore, &p.Ignore, diags)
 	buildStringList(ctx, plan.Tags, &p.Tags, diags)
 
-	p.Args = buildSection(ctx, plan.Args, diags)
-	p.Headers = buildSection(ctx, plan.Headers, diags)
-	p.Cookies = buildSection(ctx, plan.Cookies, diags)
-	p.Path = buildSection(ctx, plan.Path, diags)
-	p.URL = buildSection(ctx, plan.URL, diags)
-	p.AllSections = buildSection(ctx, plan.AllSections, diags)
+	p.Args = buildSection(ctx, plan.Args, false, diags)
+	p.Headers = buildSection(ctx, plan.Headers, false, diags)
+	p.Cookies = buildSection(ctx, plan.Cookies, false, diags)
+	p.Path = buildSection(ctx, plan.Path, false, diags)
+	p.URL = buildSection(ctx, plan.URL, true, diags)
+	p.AllSections = buildSection(ctx, plan.AllSections, false, diags)
 	p.Decoding = buildDecoding(ctx, plan.Decoding, diags)
 
 	return p
@@ -555,15 +555,21 @@ func buildStringList(ctx context.Context, list types.List, dst *[]string, diags 
 }
 
 // buildSection converts a section object into the client struct.
-func buildSection(ctx context.Context, obj types.Object, diags *diag.Diagnostics) client.ContentFilterProfileSection {
+// useText selects whether the section uses the "text" entry list (url) or "names" (all others).
+// Only the relevant list is sent; the other is left nil so it is omitted from JSON.
+func buildSection(ctx context.Context, obj types.Object, useText bool, diags *diag.Diagnostics) client.ContentFilterProfileSection {
 	if obj.IsNull() || obj.IsUnknown() {
-		return client.ContentFilterProfileSection{
+		section := client.ContentFilterProfileSection{
 			MaxCount:  1,
 			MaxLength: 1024,
-			Names:     []client.ContentFilterEntryMatch{},
 			Regex:     []client.ContentFilterEntryMatch{},
-			Text:      []client.ContentFilterEntryMatch{},
 		}
+		if useText {
+			section.Text = []client.ContentFilterEntryMatch{}
+		} else {
+			section.Names = []client.ContentFilterEntryMatch{}
+		}
+		return section
 	}
 
 	var sm cfSectionModel
@@ -576,20 +582,24 @@ func buildSection(ctx context.Context, obj types.Object, diags *diag.Diagnostics
 		EnableMaxLength: sm.EnableMaxLength.ValueBool(),
 	}
 
-	if names := buildEntryMatches(ctx, sm.Names, "names", diags); names != nil {
-		section.Names = names
+	if useText {
+		if text := buildEntryMatches(ctx, sm.Text, "text", diags); text != nil {
+			section.Text = text
+		} else {
+			section.Text = []client.ContentFilterEntryMatch{}
+		}
 	} else {
-		section.Names = []client.ContentFilterEntryMatch{}
+		if names := buildEntryMatches(ctx, sm.Names, "names", diags); names != nil {
+			section.Names = names
+		} else {
+			section.Names = []client.ContentFilterEntryMatch{}
+		}
 	}
+
 	if regex := buildEntryMatches(ctx, sm.Regex, "regex", diags); regex != nil {
 		section.Regex = regex
 	} else {
 		section.Regex = []client.ContentFilterEntryMatch{}
-	}
-	if text := buildEntryMatches(ctx, sm.Text, "text", diags); text != nil {
-		section.Text = text
-	} else {
-		section.Text = []client.ContentFilterEntryMatch{}
 	}
 
 	return section
