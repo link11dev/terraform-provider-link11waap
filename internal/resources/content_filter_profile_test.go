@@ -17,8 +17,8 @@ import (
 func emptySectionObject() types.Object {
 	objType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
 	return types.ObjectValueMust(cfSectionAttrTypes(), map[string]attr.Value{
-		"max_count":         types.Int64Value(0),
-		"max_length":        types.Int64Value(0),
+		"max_count":         types.Int64Value(1),
+		"max_length":        types.Int64Value(1024),
 		"enable_max_count":  types.BoolValue(false),
 		"enable_max_length": types.BoolValue(false),
 		"names":             types.ListNull(objType),
@@ -133,7 +133,7 @@ func TestCfSectionAttrTypes(t *testing.T) {
 
 func TestCfEntryMatchAttrTypes(t *testing.T) {
 	m := cfEntryMatchAttrTypes()
-	for _, k := range []string{"key", "reg", "restrict", "mask", "ignore_cf_rule_tags", "domain", "path", "case_insensitive", "active"} {
+	for _, k := range []string{"id", "key", "reg", "restrict", "mask", "ignore_cf_rule_tags", "domain", "path", "case_insensitive", "active"} {
 		_, ok := m[k]
 		assert.True(t, ok, "expected attr type %q", k)
 	}
@@ -190,7 +190,8 @@ func TestContentFilterProfileResource_buildProfile_NullListsEmptySections(t *tes
 	assert.Equal(t, "act1", p.Action)
 	assert.Nil(t, p.ContentType)
 	assert.Nil(t, p.Tags)
-	assert.Nil(t, p.Args.Names)
+	assert.NotNil(t, p.Args.Names)
+	assert.Empty(t, p.Args.Names)
 	assert.True(t, p.Decoding.Base64)
 }
 
@@ -203,6 +204,7 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 
 	entryObjType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
 	entry := types.ObjectValueMust(cfEntryMatchAttrTypes(), map[string]attr.Value{
+		"id":                  types.StringValue(""),
 		"key":                 types.StringValue("mykey"),
 		"reg":                 types.StringValue(".*"),
 		"restrict":            types.BoolValue(true),
@@ -273,6 +275,8 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 	assert.Equal(t, "/api", p.Args.Names[0].Path)
 	assert.True(t, p.Args.Names[0].CaseInsensitive)
 	assert.True(t, p.Args.Names[0].Active)
+	assert.Equal(t, "names", p.Args.Names[0].Type)
+	assert.NotEmpty(t, p.Args.Names[0].ID)
 	// decoding round-trip
 	assert.False(t, p.Decoding.Base64)
 	assert.True(t, p.Decoding.Dual)

@@ -363,6 +363,7 @@ func TestActionResource_CRUD_WithFailingClient(t *testing.T) {
 // cfSectionTfType returns the tftypes.Object type for a profile section.
 func cfSectionTfType() tftypes.Object {
 	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":                  tftypes.String,
 		"key":                 tftypes.String,
 		"reg":                 tftypes.String,
 		"restrict":            tftypes.Bool,

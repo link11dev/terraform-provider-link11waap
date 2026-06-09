@@ -434,13 +434,15 @@ type ContentFilterProfileSection struct {
 	MaxLength       int                       `json:"max_length"`
 	EnableMaxCount  bool                      `json:"enable_max_count"`
 	EnableMaxLength bool                      `json:"enable_max_length"`
-	Names           []ContentFilterEntryMatch `json:"names,omitempty"`
-	Regex           []ContentFilterEntryMatch `json:"regex,omitempty"`
-	Text            []ContentFilterEntryMatch `json:"text,omitempty"`
+	Names           []ContentFilterEntryMatch `json:"names"`
+	Regex           []ContentFilterEntryMatch `json:"regex"`
+	Text            []ContentFilterEntryMatch `json:"text"`
 }
 
 // ContentFilterEntryMatch represents a single matcher entry inside a section.
 type ContentFilterEntryMatch struct {
+	ID               string   `json:"id,omitempty"`
+	Type             string   `json:"type,omitempty"`
 	Key              string   `json:"key,omitempty"`
 	Reg              string   `json:"reg,omitempty"`
 	Restrict         bool     `json:"restrict"`
