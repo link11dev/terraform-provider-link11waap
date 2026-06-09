@@ -84,6 +84,16 @@ type cfSectionModel struct {
 	Text            types.List  `tfsdk:"text"`
 }
 
+// cfURLSectionModel mirrors the url section (no names).
+type cfURLSectionModel struct {
+	MaxCount        types.Int64 `tfsdk:"max_count"`
+	MaxLength       types.Int64 `tfsdk:"max_length"`
+	EnableMaxCount  types.Bool  `tfsdk:"enable_max_count"`
+	EnableMaxLength types.Bool  `tfsdk:"enable_max_length"`
+	Regex           types.List  `tfsdk:"regex"`
+	Text            types.List  `tfsdk:"text"`
+}
+
 // cfDecodingModel mirrors the decoding object schema.
 type cfDecodingModel struct {
 	Base64  types.Bool `tfsdk:"base64"`
@@ -117,6 +127,19 @@ func cfSectionAttrTypes() map[string]attr.Type {
 		"enable_max_count":  types.BoolType,
 		"enable_max_length": types.BoolType,
 		"names":             entryList,
+		"regex":             entryList,
+		"text":              entryList,
+	}
+}
+
+// cfURLSectionAttrTypes is the attr.Type map for the url section (no names).
+func cfURLSectionAttrTypes() map[string]attr.Type {
+	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}}
+	return map[string]attr.Type{
+		"max_count":         types.Int64Type,
+		"max_length":        types.Int64Type,
+		"enable_max_count":  types.BoolType,
+		"enable_max_length": types.BoolType,
 		"regex":             entryList,
 		"text":              entryList,
 	}
@@ -253,6 +276,55 @@ func cfSectionSchema(description string, required bool) schema.SingleNestedAttri
 	return out
 }
 
+// cfURLSectionSchema returns a SingleNestedAttribute for the url section (no names).
+func cfURLSectionSchema(description string) schema.SingleNestedAttribute {
+	entryList := schema.ListNestedAttribute{
+		Optional: true,
+		NestedObject: schema.NestedAttributeObject{
+			Attributes: cfEntryMatchSchemaAttrs(),
+		},
+	}
+	return schema.SingleNestedAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: description,
+		Attributes: map[string]schema.Attribute{
+			"max_count": schema.Int64Attribute{
+				Description: "Maximum number of items of this section type allowed.",
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(1),
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1),
+				},
+			},
+			"max_length": schema.Int64Attribute{
+				Description: "Maximum number of characters per item.",
+				Optional:    true,
+				Computed:    true,
+				Default:     int64default.StaticInt64(1024),
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1),
+				},
+			},
+			"enable_max_count": schema.BoolAttribute{
+				Description: "Enable max-count enforcement.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"enable_max_length": schema.BoolAttribute{
+				Description: "Enable max-length enforcement.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"regex": entryList,
+			"text":  entryList,
+		},
+	}
+}
+
 // NewContentFilterProfileResource creates a new content filter profile resource instance.
 func NewContentFilterProfileResource() resource.Resource {
 	return &ContentFilterProfileResource{}
@@ -352,7 +424,7 @@ func (r *ContentFilterProfileResource) Schema(_ context.Context, _ resource.Sche
 			"headers":     cfSectionSchema("Headers section.", true),
 			"cookies":     cfSectionSchema("Cookies section.", true),
 			"path":        cfSectionSchema("Path section.", true),
-			"url":         cfSectionSchema("URL section.", false),
+			"url":         cfURLSectionSchema("URL section."),
 			"allsections": cfSectionSchema("All sections section.", false),
 			"decoding": schema.SingleNestedAttribute{
 				Description: "Decoding flags.",
@@ -540,7 +612,7 @@ func (r *ContentFilterProfileResource) buildProfile(ctx context.Context, plan *C
 	p.Headers = buildSection(ctx, plan.Headers, false, diags)
 	p.Cookies = buildSection(ctx, plan.Cookies, false, diags)
 	p.Path = buildSection(ctx, plan.Path, false, diags)
-	p.URL = buildSection(ctx, plan.URL, true, diags)
+	p.URL = buildURLSection(ctx, plan.URL, diags)
 	p.AllSections = buildSection(ctx, plan.AllSections, false, diags)
 	p.Decoding = buildDecoding(ctx, plan.Decoding, diags)
 
@@ -592,6 +664,42 @@ func buildSection(ctx context.Context, obj types.Object, useText bool, diags *di
 		} else {
 			section.Text = []client.ContentFilterEntryMatch{}
 		}
+	}
+
+	if regex := buildEntryMatches(ctx, sm.Regex, "regex", diags); regex != nil {
+		section.Regex = regex
+	} else {
+		section.Regex = []client.ContentFilterEntryMatch{}
+	}
+
+	return section
+}
+
+// buildURLSection converts the url section object (no names) into the client struct.
+func buildURLSection(ctx context.Context, obj types.Object, diags *diag.Diagnostics) client.ContentFilterURLSection {
+	if obj.IsNull() || obj.IsUnknown() {
+		return client.ContentFilterURLSection{
+			MaxCount:  1,
+			MaxLength: 1024,
+			Regex:     []client.ContentFilterEntryMatch{},
+			Text:      []client.ContentFilterEntryMatch{},
+		}
+	}
+
+	var sm cfURLSectionModel
+	diags.Append(obj.As(ctx, &sm, basetypes.ObjectAsOptions{})...)
+
+	section := client.ContentFilterURLSection{
+		MaxCount:        int(sm.MaxCount.ValueInt64()),
+		MaxLength:       int(sm.MaxLength.ValueInt64()),
+		EnableMaxCount:  sm.EnableMaxCount.ValueBool(),
+		EnableMaxLength: sm.EnableMaxLength.ValueBool(),
+	}
+
+	if text := buildEntryMatches(ctx, sm.Text, "text", diags); text != nil {
+		section.Text = text
+	} else {
+		section.Text = []client.ContentFilterEntryMatch{}
 	}
 
 	if regex := buildEntryMatches(ctx, sm.Regex, "regex", diags); regex != nil {
@@ -678,7 +786,7 @@ func (r *ContentFilterProfileResource) flattenProfile(ctx context.Context, p *cl
 	state.Headers = flattenSection(ctx, p.Headers, diags)
 	state.Cookies = flattenSection(ctx, p.Cookies, diags)
 	state.Path = flattenSection(ctx, p.Path, diags)
-	state.URL = flattenSection(ctx, p.URL, diags)
+	state.URL = flattenURLSection(ctx, p.URL, diags)
 	state.AllSections = flattenSection(ctx, p.AllSections, diags)
 	state.Decoding = flattenDecoding(p.Decoding)
 }
@@ -701,6 +809,20 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
 		"names":             flattenEntryMatches(ctx, section.Names, diags),
+		"regex":             flattenEntryMatches(ctx, section.Regex, diags),
+		"text":              flattenEntryMatches(ctx, section.Text, diags),
+	})
+	diags.Append(d...)
+	return obj
+}
+
+// flattenURLSection builds the Terraform object value for the url section (no names).
+func flattenURLSection(ctx context.Context, section client.ContentFilterURLSection, diags *diag.Diagnostics) types.Object {
+	obj, d := types.ObjectValue(cfURLSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(int64(section.MaxCount)),
+		"max_length":        types.Int64Value(int64(section.MaxLength)),
+		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
+		"enable_max_length": types.BoolValue(section.EnableMaxLength),
 		"regex":             flattenEntryMatches(ctx, section.Regex, diags),
 		"text":              flattenEntryMatches(ctx, section.Text, diags),
 	})

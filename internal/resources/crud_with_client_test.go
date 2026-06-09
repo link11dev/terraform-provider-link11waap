@@ -401,6 +401,45 @@ func cfSectionTfValue() tftypes.Value {
 	})
 }
 
+// cfURLSectionTfType returns the tftypes.Object type for the url section (no names).
+func cfURLSectionTfType() tftypes.Object {
+	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":                  tftypes.String,
+		"key":                 tftypes.String,
+		"reg":                 tftypes.String,
+		"restrict":            tftypes.Bool,
+		"mask":                tftypes.Bool,
+		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
+		"domain":              tftypes.String,
+		"path":                tftypes.String,
+		"case_insensitive":    tftypes.Bool,
+		"active":              tftypes.Bool,
+	}}
+	entryList := tftypes.List{ElementType: entryType}
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"max_count":         tftypes.Number,
+		"max_length":        tftypes.Number,
+		"enable_max_count":  tftypes.Bool,
+		"enable_max_length": tftypes.Bool,
+		"regex":             entryList,
+		"text":              entryList,
+	}}
+}
+
+// cfURLSectionTfValue returns a zero-value tftypes.Value for the url section.
+func cfURLSectionTfValue() tftypes.Value {
+	st := cfURLSectionTfType()
+	entryList := st.AttributeTypes["regex"]
+	return tftypes.NewValue(st, map[string]tftypes.Value{
+		"max_count":         tftypes.NewValue(tftypes.Number, 0),
+		"max_length":        tftypes.NewValue(tftypes.Number, 0),
+		"enable_max_count":  tftypes.NewValue(tftypes.Bool, false),
+		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
+		"regex":             tftypes.NewValue(entryList, nil),
+		"text":              tftypes.NewValue(entryList, nil),
+	})
+}
+
 func cfDecodingTfValue() tftypes.Value {
 	dt := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"base64":  tftypes.Bool,
@@ -432,7 +471,7 @@ func TestContentFilterProfileResource_CRUD_WithFailingClient(t *testing.T) {
 		"headers":         cfSectionTfValue(),
 		"cookies":         cfSectionTfValue(),
 		"path":            cfSectionTfValue(),
-		"url":             cfSectionTfValue(),
+		"url":             cfURLSectionTfValue(),
 		"allsections":     cfSectionTfValue(),
 		"decoding":        cfDecodingTfValue(),
 	}

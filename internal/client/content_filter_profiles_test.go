@@ -34,7 +34,7 @@ func sampleContentFilterProfile() ContentFilterProfile {
 		Headers:     ContentFilterProfileSection{MaxCount: 1, MaxLength: 1},
 		Cookies:     ContentFilterProfileSection{MaxCount: 1, MaxLength: 1},
 		Path:        ContentFilterProfileSection{MaxCount: 1, MaxLength: 1},
-		URL:         ContentFilterProfileSection{},
+		URL:         ContentFilterURLSection{},
 		AllSections: ContentFilterProfileSection{},
 		Decoding:    ContentFilterDecoding{Base64: true},
 	}

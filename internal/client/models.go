@@ -423,12 +423,12 @@ type ContentFilterProfile struct {
 	Headers        ContentFilterProfileSection `json:"headers"`
 	Cookies        ContentFilterProfileSection `json:"cookies"`
 	Path           ContentFilterProfileSection `json:"path"`
-	URL            ContentFilterProfileSection `json:"url"`
+	URL            ContentFilterURLSection     `json:"url"`
 	AllSections    ContentFilterProfileSection `json:"allsections"`
 	Decoding       ContentFilterDecoding       `json:"decoding"`
 }
 
-// ContentFilterProfileSection represents one section (args/headers/cookies/path/url/allsections).
+// ContentFilterProfileSection represents one section (args/headers/cookies/path/allsections).
 type ContentFilterProfileSection struct {
 	MaxCount        int                       `json:"max_count"`
 	MaxLength       int                       `json:"max_length"`
@@ -437,6 +437,16 @@ type ContentFilterProfileSection struct {
 	Names           []ContentFilterEntryMatch `json:"names"`
 	Regex           []ContentFilterEntryMatch `json:"regex"`
 	Text            []ContentFilterEntryMatch `json:"text,omitempty"`
+}
+
+// ContentFilterURLSection represents the url section, which does not support names.
+type ContentFilterURLSection struct {
+	MaxCount        int                       `json:"max_count"`
+	MaxLength       int                       `json:"max_length"`
+	EnableMaxCount  bool                      `json:"enable_max_count"`
+	EnableMaxLength bool                      `json:"enable_max_length"`
+	Regex           []ContentFilterEntryMatch `json:"regex"`
+	Text            []ContentFilterEntryMatch `json:"text"`
 }
 
 // ContentFilterEntryMatch represents a single matcher entry inside a section.

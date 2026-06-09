@@ -27,6 +27,18 @@ func emptySectionObject() types.Object {
 	})
 }
 
+func emptyURLSectionObject() types.Object {
+	objType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
+	return types.ObjectValueMust(cfURLSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(1),
+		"max_length":        types.Int64Value(1024),
+		"enable_max_count":  types.BoolValue(false),
+		"enable_max_length": types.BoolValue(false),
+		"regex":             types.ListNull(objType),
+		"text":              types.ListNull(objType),
+	})
+}
+
 func emptyDecodingObject() types.Object {
 	return types.ObjectValueMust(cfDecodingAttrTypes(), map[string]attr.Value{
 		"base64":  types.BoolValue(true),
@@ -172,7 +184,7 @@ func TestContentFilterProfileResource_buildProfile_NullListsEmptySections(t *tes
 		Headers:        emptySectionObject(),
 		Cookies:        emptySectionObject(),
 		Path:           emptySectionObject(),
-		URL:            emptySectionObject(),
+		URL:            emptyURLSectionObject(),
 		AllSections:    emptySectionObject(),
 		Decoding:       emptyDecodingObject(),
 	}
@@ -252,7 +264,7 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 		Headers:        emptySectionObject(),
 		Cookies:        emptySectionObject(),
 		Path:           emptySectionObject(),
-		URL:            emptySectionObject(),
+		URL:            emptyURLSectionObject(),
 		AllSections:    emptySectionObject(),
 		Decoding:       decoding,
 	}

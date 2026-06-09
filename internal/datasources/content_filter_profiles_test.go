@@ -30,7 +30,7 @@ func sampleCfProfile(id, name string) client.ContentFilterProfile {
 		Headers:     client.ContentFilterProfileSection{},
 		Cookies:     client.ContentFilterProfileSection{},
 		Path:        client.ContentFilterProfileSection{},
-		URL:         client.ContentFilterProfileSection{},
+		URL:         client.ContentFilterURLSection{},
 		AllSections: client.ContentFilterProfileSection{},
 		Decoding:    client.ContentFilterDecoding{Base64: true},
 	}
