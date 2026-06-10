@@ -51,11 +51,22 @@ type ContentFilterProfileDataModel struct {
 	Decoding       types.Object `tfsdk:"decoding"`
 }
 
-// dsCfEntryMatchAttrTypes returns the attribute type map for a matcher entry object.
+// dsCfEntryMatchAttrTypes returns the attribute type map for a parameter-style (Type A) matcher entry object.
 func dsCfEntryMatchAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"key":                 types.StringType,
-		"reg":                 types.StringType,
+		"parameter":           types.StringType,
+		"value":               types.StringType,
+		"restrict":            types.BoolType,
+		"mask":                types.BoolType,
+		"ignore_cf_rule_tags": types.ListType{ElemType: types.StringType},
+		"case_insensitive":    types.BoolType,
+		"active":              types.BoolType,
+	}
+}
+
+// dsCfEntryMatchURLPathAttrTypes returns the attribute type map for a url/path-style (Type B) matcher entry object.
+func dsCfEntryMatchURLPathAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
 		"restrict":            types.BoolType,
 		"mask":                types.BoolType,
 		"ignore_cf_rule_tags": types.ListType{ElemType: types.StringType},
@@ -82,12 +93,26 @@ func dsCfSectionAttrTypes() map[string]attr.Type {
 
 // dsCfURLSectionAttrTypes returns the attribute type map for the url section (no names).
 func dsCfURLSectionAttrTypes() map[string]attr.Type {
-	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: dsCfEntryMatchAttrTypes()}}
+	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: dsCfEntryMatchURLPathAttrTypes()}}
 	return map[string]attr.Type{
 		"max_count":         types.Int64Type,
 		"max_length":        types.Int64Type,
 		"enable_max_count":  types.BoolType,
 		"enable_max_length": types.BoolType,
+		"regex":             entryList,
+		"text":              entryList,
+	}
+}
+
+// dsCfPathSectionAttrTypes returns the attribute type map for the path section (url/path-style entries).
+func dsCfPathSectionAttrTypes() map[string]attr.Type {
+	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: dsCfEntryMatchURLPathAttrTypes()}}
+	return map[string]attr.Type{
+		"max_count":         types.Int64Type,
+		"max_length":        types.Int64Type,
+		"enable_max_count":  types.BoolType,
+		"enable_max_length": types.BoolType,
+		"names":             entryList,
 		"regex":             entryList,
 		"text":              entryList,
 	}
@@ -119,13 +144,11 @@ func dsCfSectionSchema(description string) schema.SingleNestedAttribute {
 		Computed: true,
 		NestedObject: schema.NestedAttributeObject{
 			Attributes: map[string]schema.Attribute{
-				"key":                 schema.StringAttribute{Computed: true, Description: "Exact name to match."},
-				"reg":                 schema.StringAttribute{Computed: true, Description: "Regular expression to match."},
+				"parameter":           schema.StringAttribute{Computed: true, Description: "Exact name to match."},
+				"value":               schema.StringAttribute{Computed: true, Description: "Regular expression to match."},
 				"restrict":            schema.BoolAttribute{Computed: true, Description: "Whether the matched entry is restricted."},
 				"mask":                schema.BoolAttribute{Computed: true, Description: "Whether to mask the matched value."},
 				"ignore_cf_rule_tags": schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Content filter rule tags to exclude."},
-				"domain":              schema.StringAttribute{Computed: true, Description: "Domain the entry applies to."},
-				"path":                schema.StringAttribute{Computed: true, Description: "Path the entry applies to."},
 				"case_insensitive":    schema.BoolAttribute{Computed: true, Description: "Whether matching is case insensitive."},
 				"active":              schema.BoolAttribute{Computed: true, Description: "Whether the entry is active."},
 			},
@@ -146,22 +169,25 @@ func dsCfSectionSchema(description string) schema.SingleNestedAttribute {
 	}
 }
 
+// dsCfURLPathEntrySchemaAttrs returns the computed schema attributes for a url/path-style (Type B) matcher entry.
+func dsCfURLPathEntrySchemaAttrs() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"restrict":            schema.BoolAttribute{Computed: true, Description: "Whether the matched entry is restricted."},
+		"mask":                schema.BoolAttribute{Computed: true, Description: "Whether to mask the matched value."},
+		"ignore_cf_rule_tags": schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Content filter rule tags to exclude."},
+		"domain":              schema.StringAttribute{Computed: true, Description: "Domain the entry applies to."},
+		"path":                schema.StringAttribute{Computed: true, Description: "Path the entry applies to."},
+		"case_insensitive":    schema.BoolAttribute{Computed: true, Description: "Whether matching is case insensitive."},
+		"active":              schema.BoolAttribute{Computed: true, Description: "Whether the entry is active."},
+	}
+}
+
 // dsCfURLSectionSchema returns the computed SingleNestedAttribute for the url section (no names).
 func dsCfURLSectionSchema(description string) schema.SingleNestedAttribute {
 	entryList := schema.ListNestedAttribute{
 		Computed: true,
 		NestedObject: schema.NestedAttributeObject{
-			Attributes: map[string]schema.Attribute{
-				"key":                 schema.StringAttribute{Computed: true, Description: "Exact name to match."},
-				"reg":                 schema.StringAttribute{Computed: true, Description: "Regular expression to match."},
-				"restrict":            schema.BoolAttribute{Computed: true, Description: "Whether the matched entry is restricted."},
-				"mask":                schema.BoolAttribute{Computed: true, Description: "Whether to mask the matched value."},
-				"ignore_cf_rule_tags": schema.ListAttribute{Computed: true, ElementType: types.StringType, Description: "Content filter rule tags to exclude."},
-				"domain":              schema.StringAttribute{Computed: true, Description: "Domain the entry applies to."},
-				"path":                schema.StringAttribute{Computed: true, Description: "Path the entry applies to."},
-				"case_insensitive":    schema.BoolAttribute{Computed: true, Description: "Whether matching is case insensitive."},
-				"active":              schema.BoolAttribute{Computed: true, Description: "Whether the entry is active."},
-			},
+			Attributes: dsCfURLPathEntrySchemaAttrs(),
 		},
 	}
 	return schema.SingleNestedAttribute{
@@ -172,6 +198,29 @@ func dsCfURLSectionSchema(description string) schema.SingleNestedAttribute {
 			"max_length":        schema.Int64Attribute{Computed: true, Description: "Maximum number of characters per item."},
 			"enable_max_count":  schema.BoolAttribute{Computed: true, Description: "Enable max-count enforcement."},
 			"enable_max_length": schema.BoolAttribute{Computed: true, Description: "Enable max-length enforcement."},
+			"regex":             entryList,
+			"text":              entryList,
+		},
+	}
+}
+
+// dsCfPathSectionSchema returns the computed SingleNestedAttribute for the path section (url/path-style entries).
+func dsCfPathSectionSchema(description string) schema.SingleNestedAttribute {
+	entryList := schema.ListNestedAttribute{
+		Computed: true,
+		NestedObject: schema.NestedAttributeObject{
+			Attributes: dsCfURLPathEntrySchemaAttrs(),
+		},
+	}
+	return schema.SingleNestedAttribute{
+		Computed:    true,
+		Description: description,
+		Attributes: map[string]schema.Attribute{
+			"max_count":         schema.Int64Attribute{Computed: true, Description: "Maximum number of items of this section type allowed."},
+			"max_length":        schema.Int64Attribute{Computed: true, Description: "Maximum number of characters per item."},
+			"enable_max_count":  schema.BoolAttribute{Computed: true, Description: "Enable max-count enforcement."},
+			"enable_max_length": schema.BoolAttribute{Computed: true, Description: "Enable max-length enforcement."},
+			"names":             entryList,
 			"regex":             entryList,
 			"text":              entryList,
 		},
@@ -216,7 +265,7 @@ func (d *ContentFilterProfilesDataSource) Schema(_ context.Context, _ datasource
 						"args":            dsCfSectionSchema("Arguments section."),
 						"headers":         dsCfSectionSchema("Headers section."),
 						"cookies":         dsCfSectionSchema("Cookies section."),
-						"path":            dsCfSectionSchema("Path section."),
+						"path":            dsCfPathSectionSchema("Path section."),
 						"url":             dsCfURLSectionSchema("URL section."),
 						"allsections":     dsCfSectionSchema("All sections section."),
 						"decoding": schema.SingleNestedAttribute{
@@ -305,7 +354,7 @@ func (d *ContentFilterProfilesDataSource) Read(ctx context.Context, req datasour
 		resp.Diagnostics.Append(d2...)
 		cookies, d3 := dsFlattenCfSection(ctx, p.Cookies)
 		resp.Diagnostics.Append(d3...)
-		pathSec, d4 := dsFlattenCfSection(ctx, p.Path)
+		pathSec, d4 := dsFlattenCfPathSection(ctx, p.Path)
 		resp.Diagnostics.Append(d4...)
 		urlSec, d5 := dsFlattenCfURLSection(ctx, p.URL)
 		resp.Diagnostics.Append(d5...)
@@ -353,14 +402,38 @@ func dsFlattenStringList(ctx context.Context, in []string, diags *diag.Diagnosti
 func dsFlattenCfSection(ctx context.Context, section client.ContentFilterProfileSection) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	names, dn := dsFlattenCfEntryMatches(ctx, section.Names)
+	names, dn := dsFlattenCfEntryMatchesTypeA(ctx, section.Names)
 	diags.Append(dn...)
-	regex, dr := dsFlattenCfEntryMatches(ctx, section.Regex)
+	regex, dr := dsFlattenCfEntryMatchesTypeA(ctx, section.Regex)
 	diags.Append(dr...)
-	text, dt := dsFlattenCfEntryMatches(ctx, section.Text)
+	text, dt := dsFlattenCfEntryMatchesTypeA(ctx, section.Text)
 	diags.Append(dt...)
 
 	obj, d := types.ObjectValue(dsCfSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(int64(section.MaxCount)),
+		"max_length":        types.Int64Value(int64(section.MaxLength)),
+		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
+		"enable_max_length": types.BoolValue(section.EnableMaxLength),
+		"names":             names,
+		"regex":             regex,
+		"text":              text,
+	})
+	diags.Append(d...)
+	return obj, diags
+}
+
+// dsFlattenCfPathSection converts the path section (url/path-style entries) into a Terraform object value.
+func dsFlattenCfPathSection(ctx context.Context, section client.ContentFilterProfileSection) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	names, dn := dsFlattenCfEntryMatchesTypeB(ctx, section.Names)
+	diags.Append(dn...)
+	regex, dr := dsFlattenCfEntryMatchesTypeB(ctx, section.Regex)
+	diags.Append(dr...)
+	text, dt := dsFlattenCfEntryMatchesTypeB(ctx, section.Text)
+	diags.Append(dt...)
+
+	obj, d := types.ObjectValue(dsCfPathSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
@@ -377,9 +450,9 @@ func dsFlattenCfSection(ctx context.Context, section client.ContentFilterProfile
 func dsFlattenCfURLSection(ctx context.Context, section client.ContentFilterURLSection) (types.Object, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
-	regex, dr := dsFlattenCfEntryMatches(ctx, section.Regex)
+	regex, dr := dsFlattenCfEntryMatchesTypeB(ctx, section.Regex)
 	diags.Append(dr...)
-	text, dt := dsFlattenCfEntryMatches(ctx, section.Text)
+	text, dt := dsFlattenCfEntryMatchesTypeB(ctx, section.Text)
 	diags.Append(dt...)
 
 	obj, d := types.ObjectValue(dsCfURLSectionAttrTypes(), map[string]attr.Value{
@@ -394,8 +467,8 @@ func dsFlattenCfURLSection(ctx context.Context, section client.ContentFilterURLS
 	return obj, diags
 }
 
-// dsFlattenCfEntryMatches converts matcher entries into a Terraform list value.
-func dsFlattenCfEntryMatches(ctx context.Context, in []client.ContentFilterEntryMatch) (types.List, diag.Diagnostics) {
+// dsFlattenCfEntryMatchesTypeA converts parameter-style (Type A) matcher entries into a Terraform list value.
+func dsFlattenCfEntryMatchesTypeA(ctx context.Context, in []client.ContentFilterEntryMatch) (types.List, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	objType := types.ObjectType{AttrTypes: dsCfEntryMatchAttrTypes()}
 
@@ -406,8 +479,35 @@ func dsFlattenCfEntryMatches(ctx context.Context, in []client.ContentFilterEntry
 	values := make([]attr.Value, len(in))
 	for i, m := range in {
 		obj, d := types.ObjectValue(dsCfEntryMatchAttrTypes(), map[string]attr.Value{
-			"key":                 types.StringValue(m.Key),
-			"reg":                 types.StringValue(m.Reg),
+			"parameter":           types.StringValue(m.Key),
+			"value":               types.StringValue(m.Reg),
+			"restrict":            types.BoolValue(m.Restrict),
+			"mask":                types.BoolValue(m.Mask),
+			"ignore_cf_rule_tags": dsFlattenStringList(ctx, m.IgnoreCFRuleTags, &diags),
+			"case_insensitive":    types.BoolValue(m.CaseInsensitive),
+			"active":              types.BoolValue(m.Active),
+		})
+		diags.Append(d...)
+		values[i] = obj
+	}
+
+	lv, d := types.ListValue(objType, values)
+	diags.Append(d...)
+	return lv, diags
+}
+
+// dsFlattenCfEntryMatchesTypeB converts url/path-style (Type B) matcher entries into a Terraform list value.
+func dsFlattenCfEntryMatchesTypeB(ctx context.Context, in []client.ContentFilterEntryMatch) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	objType := types.ObjectType{AttrTypes: dsCfEntryMatchURLPathAttrTypes()}
+
+	if len(in) == 0 {
+		return types.ListNull(objType), diags
+	}
+
+	values := make([]attr.Value, len(in))
+	for i, m := range in {
+		obj, d := types.ObjectValue(dsCfEntryMatchURLPathAttrTypes(), map[string]attr.Value{
 			"restrict":            types.BoolValue(m.Restrict),
 			"mask":                types.BoolValue(m.Mask),
 			"ignore_cf_rule_tags": dsFlattenStringList(ctx, m.IgnoreCFRuleTags, &diags),

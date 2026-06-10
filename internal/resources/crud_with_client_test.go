@@ -360,12 +360,24 @@ func TestActionResource_CRUD_WithFailingClient(t *testing.T) {
 
 // --- Content Filter Profile with client ---
 
-// cfSectionTfType returns the tftypes.Object type for a profile section.
-func cfSectionTfType() tftypes.Object {
-	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+// cfEntryTypeATfType returns the tftypes.Object type for a parameter-style (Type A) entry.
+func cfEntryTypeATfType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"id":                  tftypes.String,
-		"key":                 tftypes.String,
-		"reg":                 tftypes.String,
+		"parameter":           tftypes.String,
+		"value":               tftypes.String,
+		"restrict":            tftypes.Bool,
+		"mask":                tftypes.Bool,
+		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
+		"case_insensitive":    tftypes.Bool,
+		"active":              tftypes.Bool,
+	}}
+}
+
+// cfEntryTypeBTfType returns the tftypes.Object type for a url/path-style (Type B) entry.
+func cfEntryTypeBTfType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":                  tftypes.String,
 		"restrict":            tftypes.Bool,
 		"mask":                tftypes.Bool,
 		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
@@ -374,7 +386,11 @@ func cfSectionTfType() tftypes.Object {
 		"case_insensitive":    tftypes.Bool,
 		"active":              tftypes.Bool,
 	}}
-	entryList := tftypes.List{ElementType: entryType}
+}
+
+// cfSectionTfType returns the tftypes.Object type for a profile section (Type A entries).
+func cfSectionTfType() tftypes.Object {
+	entryList := tftypes.List{ElementType: cfEntryTypeATfType()}
 	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"max_count":         tftypes.Number,
 		"max_length":        tftypes.Number,
@@ -401,21 +417,38 @@ func cfSectionTfValue() tftypes.Value {
 	})
 }
 
-// cfURLSectionTfType returns the tftypes.Object type for the url section (no names).
-func cfURLSectionTfType() tftypes.Object {
-	entryType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-		"id":                  tftypes.String,
-		"key":                 tftypes.String,
-		"reg":                 tftypes.String,
-		"restrict":            tftypes.Bool,
-		"mask":                tftypes.Bool,
-		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
-		"domain":              tftypes.String,
-		"path":                tftypes.String,
-		"case_insensitive":    tftypes.Bool,
-		"active":              tftypes.Bool,
+// cfPathSectionTfType returns the tftypes.Object type for the path section (Type B entries).
+func cfPathSectionTfType() tftypes.Object {
+	entryList := tftypes.List{ElementType: cfEntryTypeBTfType()}
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"max_count":         tftypes.Number,
+		"max_length":        tftypes.Number,
+		"enable_max_count":  tftypes.Bool,
+		"enable_max_length": tftypes.Bool,
+		"names":             entryList,
+		"regex":             entryList,
+		"text":              entryList,
 	}}
-	entryList := tftypes.List{ElementType: entryType}
+}
+
+// cfPathSectionTfValue returns a zero-value tftypes.Value for the path section.
+func cfPathSectionTfValue() tftypes.Value {
+	st := cfPathSectionTfType()
+	entryList := st.AttributeTypes["names"]
+	return tftypes.NewValue(st, map[string]tftypes.Value{
+		"max_count":         tftypes.NewValue(tftypes.Number, 0),
+		"max_length":        tftypes.NewValue(tftypes.Number, 0),
+		"enable_max_count":  tftypes.NewValue(tftypes.Bool, false),
+		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
+		"names":             tftypes.NewValue(entryList, nil),
+		"regex":             tftypes.NewValue(entryList, nil),
+		"text":              tftypes.NewValue(entryList, nil),
+	})
+}
+
+// cfURLSectionTfType returns the tftypes.Object type for the url section (no names, Type B entries).
+func cfURLSectionTfType() tftypes.Object {
+	entryList := tftypes.List{ElementType: cfEntryTypeBTfType()}
 	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"max_count":         tftypes.Number,
 		"max_length":        tftypes.Number,
@@ -470,7 +503,7 @@ func TestContentFilterProfileResource_CRUD_WithFailingClient(t *testing.T) {
 		"args":            cfSectionTfValue(),
 		"headers":         cfSectionTfValue(),
 		"cookies":         cfSectionTfValue(),
-		"path":            cfSectionTfValue(),
+		"path":            cfPathSectionTfValue(),
 		"url":             cfURLSectionTfValue(),
 		"allsections":     cfSectionTfValue(),
 		"decoding":        cfDecodingTfValue(),

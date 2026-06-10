@@ -28,12 +28,25 @@ func emptySectionObject() types.Object {
 }
 
 func emptyURLSectionObject() types.Object {
-	objType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
+	objType := types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}
 	return types.ObjectValueMust(cfURLSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(1),
 		"max_length":        types.Int64Value(1024),
 		"enable_max_count":  types.BoolValue(false),
 		"enable_max_length": types.BoolValue(false),
+		"regex":             types.ListNull(objType),
+		"text":              types.ListNull(objType),
+	})
+}
+
+func emptyPathSectionObject() types.Object {
+	objType := types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}
+	return types.ObjectValueMust(cfPathSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(1),
+		"max_length":        types.Int64Value(1024),
+		"enable_max_count":  types.BoolValue(false),
+		"enable_max_length": types.BoolValue(false),
+		"names":             types.ListNull(objType),
 		"regex":             types.ListNull(objType),
 		"text":              types.ListNull(objType),
 	})
@@ -145,10 +158,26 @@ func TestCfSectionAttrTypes(t *testing.T) {
 
 func TestCfEntryMatchAttrTypes(t *testing.T) {
 	m := cfEntryMatchAttrTypes()
-	for _, k := range []string{"id", "key", "reg", "restrict", "mask", "ignore_cf_rule_tags", "domain", "path", "case_insensitive", "active"} {
+	for _, k := range []string{"id", "parameter", "value", "restrict", "mask", "ignore_cf_rule_tags", "case_insensitive", "active"} {
 		_, ok := m[k]
 		assert.True(t, ok, "expected attr type %q", k)
 	}
+	// Type A must not contain domain/path.
+	_, hasDomain := m["domain"]
+	assert.False(t, hasDomain, "Type A should not contain domain")
+	_, hasPath := m["path"]
+	assert.False(t, hasPath, "Type A should not contain path")
+
+	mb := cfEntryMatchURLPathAttrTypes()
+	for _, k := range []string{"id", "restrict", "mask", "ignore_cf_rule_tags", "domain", "path", "case_insensitive", "active"} {
+		_, ok := mb[k]
+		assert.True(t, ok, "expected Type B attr type %q", k)
+	}
+	// Type B must not contain parameter/value.
+	_, hasParam := mb["parameter"]
+	assert.False(t, hasParam, "Type B should not contain parameter")
+	_, hasValue := mb["value"]
+	assert.False(t, hasValue, "Type B should not contain value")
 }
 
 func TestCfDecodingAttrTypes(t *testing.T) {
@@ -183,7 +212,7 @@ func TestContentFilterProfileResource_buildProfile_NullListsEmptySections(t *tes
 		Args:           emptySectionObject(),
 		Headers:        emptySectionObject(),
 		Cookies:        emptySectionObject(),
-		Path:           emptySectionObject(),
+		Path:           emptyPathSectionObject(),
 		URL:            emptyURLSectionObject(),
 		AllSections:    emptySectionObject(),
 		Decoding:       emptyDecodingObject(),
@@ -217,13 +246,11 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 	entryObjType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
 	entry := types.ObjectValueMust(cfEntryMatchAttrTypes(), map[string]attr.Value{
 		"id":                  types.StringValue(""),
-		"key":                 types.StringValue("mykey"),
-		"reg":                 types.StringValue(".*"),
+		"parameter":           types.StringValue("mykey"),
+		"value":               types.StringValue(".*"),
 		"restrict":            types.BoolValue(true),
 		"mask":                types.BoolValue(true),
 		"ignore_cf_rule_tags": types.ListValueMust(types.StringType, []attr.Value{types.StringValue("skip")}),
-		"domain":              types.StringValue("example.com"),
-		"path":                types.StringValue("/api"),
 		"case_insensitive":    types.BoolValue(true),
 		"active":              types.BoolValue(true),
 	})
@@ -263,7 +290,7 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 		Args:           section,
 		Headers:        emptySectionObject(),
 		Cookies:        emptySectionObject(),
-		Path:           emptySectionObject(),
+		Path:           emptyPathSectionObject(),
 		URL:            emptyURLSectionObject(),
 		AllSections:    emptySectionObject(),
 		Decoding:       decoding,
@@ -283,8 +310,8 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 	assert.True(t, p.Args.Names[0].Restrict)
 	assert.True(t, p.Args.Names[0].Mask)
 	assert.Equal(t, []string{"skip"}, p.Args.Names[0].IgnoreCFRuleTags)
-	assert.Equal(t, "example.com", p.Args.Names[0].Domain)
-	assert.Equal(t, "/api", p.Args.Names[0].Path)
+	assert.Equal(t, "", p.Args.Names[0].Domain)
+	assert.Equal(t, "", p.Args.Names[0].Path)
 	assert.True(t, p.Args.Names[0].CaseInsensitive)
 	assert.True(t, p.Args.Names[0].Active)
 	assert.Equal(t, "names", p.Args.Names[0].Type)

@@ -60,11 +60,21 @@ type ContentFilterProfileResourceModel struct {
 	Decoding       types.Object `tfsdk:"decoding"`
 }
 
-// cfEntryMatchModel mirrors the section matcher object schema.
+// cfEntryMatchModel mirrors the parameter-style (Type A) section matcher object schema.
 type cfEntryMatchModel struct {
 	ID               types.String `tfsdk:"id"`
-	Key              types.String `tfsdk:"key"`
-	Reg              types.String `tfsdk:"reg"`
+	Parameter        types.String `tfsdk:"parameter"`
+	Value            types.String `tfsdk:"value"`
+	Restrict         types.Bool   `tfsdk:"restrict"`
+	Mask             types.Bool   `tfsdk:"mask"`
+	IgnoreCFRuleTags types.List   `tfsdk:"ignore_cf_rule_tags"`
+	CaseInsensitive  types.Bool   `tfsdk:"case_insensitive"`
+	Active           types.Bool   `tfsdk:"active"`
+}
+
+// cfEntryMatchURLPathModel mirrors the url/path-style (Type B) section matcher object schema.
+type cfEntryMatchURLPathModel struct {
+	ID               types.String `tfsdk:"id"`
 	Restrict         types.Bool   `tfsdk:"restrict"`
 	Mask             types.Bool   `tfsdk:"mask"`
 	IgnoreCFRuleTags types.List   `tfsdk:"ignore_cf_rule_tags"`
@@ -103,12 +113,24 @@ type cfDecodingModel struct {
 	Unicode types.Bool `tfsdk:"unicode"`
 }
 
-// cfEntryMatchAttrTypes is the attr.Type map for a matcher entry object.
+// cfEntryMatchAttrTypes is the attr.Type map for a parameter-style (Type A) matcher entry object.
 func cfEntryMatchAttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"id":                  types.StringType,
-		"key":                 types.StringType,
-		"reg":                 types.StringType,
+		"parameter":           types.StringType,
+		"value":               types.StringType,
+		"restrict":            types.BoolType,
+		"mask":                types.BoolType,
+		"ignore_cf_rule_tags": types.ListType{ElemType: types.StringType},
+		"case_insensitive":    types.BoolType,
+		"active":              types.BoolType,
+	}
+}
+
+// cfEntryMatchURLPathAttrTypes is the attr.Type map for a url/path-style (Type B) matcher entry object.
+func cfEntryMatchURLPathAttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"id":                  types.StringType,
 		"restrict":            types.BoolType,
 		"mask":                types.BoolType,
 		"ignore_cf_rule_tags": types.ListType{ElemType: types.StringType},
@@ -135,12 +157,26 @@ func cfSectionAttrTypes() map[string]attr.Type {
 
 // cfURLSectionAttrTypes is the attr.Type map for the url section (no names).
 func cfURLSectionAttrTypes() map[string]attr.Type {
-	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}}
+	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}}
 	return map[string]attr.Type{
 		"max_count":         types.Int64Type,
 		"max_length":        types.Int64Type,
 		"enable_max_count":  types.BoolType,
 		"enable_max_length": types.BoolType,
+		"regex":             entryList,
+		"text":              entryList,
+	}
+}
+
+// cfPathSectionAttrTypes is the attr.Type map for the path section (url/path-style entries).
+func cfPathSectionAttrTypes() map[string]attr.Type {
+	entryList := types.ListType{ElemType: types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}}
+	return map[string]attr.Type{
+		"max_count":         types.Int64Type,
+		"max_length":        types.Int64Type,
+		"enable_max_count":  types.BoolType,
+		"enable_max_length": types.BoolType,
+		"names":             entryList,
 		"regex":             entryList,
 		"text":              entryList,
 	}
@@ -167,17 +203,13 @@ func cfEntryMatchSchemaAttrs() map[string]schema.Attribute {
 				stringplanmodifier.UseStateForUnknown(),
 			},
 		},
-		"key": schema.StringAttribute{
+		"parameter": schema.StringAttribute{
 			Description: "Exact name to match.",
-			Optional:    true,
-			Computed:    true,
-			Default:     stringdefault.StaticString(""),
+			Required:    true,
 		},
-		"reg": schema.StringAttribute{
+		"value": schema.StringAttribute{
 			Description: "Regular expression to match.",
-			Optional:    true,
-			Computed:    true,
-			Default:     stringdefault.StaticString(""),
+			Required:    true,
 		},
 		"restrict": schema.BoolAttribute{
 			Description: "Whether the matched entry is restricted.",
@@ -196,17 +228,56 @@ func cfEntryMatchSchemaAttrs() map[string]schema.Attribute {
 			Optional:    true,
 			ElementType: types.StringType,
 		},
-		"domain": schema.StringAttribute{
-			Description: "Domain the entry applies to.",
+		"case_insensitive": schema.BoolAttribute{
+			Description: "Whether matching is case insensitive.",
 			Optional:    true,
 			Computed:    true,
-			Default:     stringdefault.StaticString(""),
+			Default:     booldefault.StaticBool(false),
+		},
+		"active": schema.BoolAttribute{
+			Description: "Whether the entry is active.",
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(true),
+		},
+	}
+}
+
+// cfEntryMatchURLPathSchemaAttrs returns the schema attributes for a url/path-style (Type B) matcher entry.
+func cfEntryMatchURLPathSchemaAttrs() map[string]schema.Attribute {
+	return map[string]schema.Attribute{
+		"id": schema.StringAttribute{
+			Description: "Unique identifier for the entry, generated by the provider.",
+			Optional:    true,
+			Computed:    true,
+			PlanModifiers: []planmodifier.String{
+				stringplanmodifier.UseStateForUnknown(),
+			},
+		},
+		"domain": schema.StringAttribute{
+			Description: "Domain the entry applies to.",
+			Required:    true,
 		},
 		"path": schema.StringAttribute{
 			Description: "Path the entry applies to.",
+			Required:    true,
+		},
+		"restrict": schema.BoolAttribute{
+			Description: "Whether the matched entry is restricted.",
 			Optional:    true,
 			Computed:    true,
-			Default:     stringdefault.StaticString(""),
+			Default:     booldefault.StaticBool(false),
+		},
+		"mask": schema.BoolAttribute{
+			Description: "Whether to mask the matched value.",
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+		},
+		"ignore_cf_rule_tags": schema.ListAttribute{
+			Description: "Content filter rule tags to exclude.",
+			Optional:    true,
+			ElementType: types.StringType,
 		},
 		"case_insensitive": schema.BoolAttribute{
 			Description: "Whether matching is case insensitive.",
@@ -288,7 +359,7 @@ func cfURLSectionSchema(description string) schema.SingleNestedAttribute {
 	entryList := schema.ListNestedAttribute{
 		Optional: true,
 		NestedObject: schema.NestedAttributeObject{
-			Attributes: cfEntryMatchSchemaAttrs(),
+			Attributes: cfEntryMatchURLPathSchemaAttrs(),
 		},
 	}
 	return schema.SingleNestedAttribute{
@@ -333,6 +404,66 @@ func cfURLSectionSchema(description string) schema.SingleNestedAttribute {
 			"text":  entryList,
 		},
 	}
+}
+
+// cfPathSectionSchema returns a SingleNestedAttribute describing the path section (url/path-style entries).
+func cfPathSectionSchema(description string, required bool) schema.SingleNestedAttribute {
+	entryList := schema.ListNestedAttribute{
+		Optional: true,
+		NestedObject: schema.NestedAttributeObject{
+			Attributes: cfEntryMatchURLPathSchemaAttrs(),
+		},
+	}
+	attrs := map[string]schema.Attribute{
+		"max_count": schema.Int64Attribute{
+			Description: "Maximum number of items of this section type allowed.",
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(1),
+			Validators: []validator.Int64{
+				int64validator.AtLeast(1),
+			},
+		},
+		"max_length": schema.Int64Attribute{
+			Description: "Maximum number of characters per item.",
+			Optional:    true,
+			Computed:    true,
+			Default:     int64default.StaticInt64(1024),
+			Validators: []validator.Int64{
+				int64validator.AtLeast(1),
+			},
+		},
+		"enable_max_count": schema.BoolAttribute{
+			Description: "Enable max-count enforcement.",
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+		},
+		"enable_max_length": schema.BoolAttribute{
+			Description: "Enable max-length enforcement.",
+			Optional:    true,
+			Computed:    true,
+			Default:     booldefault.StaticBool(false),
+		},
+		"names": entryList,
+		"regex": entryList,
+		"text":  entryList,
+	}
+
+	out := schema.SingleNestedAttribute{
+		Description: description,
+		Attributes:  attrs,
+	}
+	if required {
+		out.Required = true
+	} else {
+		out.Optional = true
+		out.Computed = true
+		out.PlanModifiers = []planmodifier.Object{
+			objectplanmodifier.UseStateForUnknown(),
+		}
+	}
+	return out
 }
 
 // NewContentFilterProfileResource creates a new content filter profile resource instance.
@@ -433,7 +564,7 @@ func (r *ContentFilterProfileResource) Schema(_ context.Context, _ resource.Sche
 			"args":        cfSectionSchema("Arguments section.", true),
 			"headers":     cfSectionSchema("Headers section.", true),
 			"cookies":     cfSectionSchema("Cookies section.", true),
-			"path":        cfSectionSchema("Path section.", true),
+			"path":        cfPathSectionSchema("Path section.", true),
 			"url":         cfURLSectionSchema("URL section."),
 			"allsections": cfSectionSchema("All sections section.", false),
 			"decoding": schema.SingleNestedAttribute{
@@ -621,7 +752,7 @@ func (r *ContentFilterProfileResource) buildProfile(ctx context.Context, plan *C
 	p.Args = buildSection(ctx, plan.Args, false, diags)
 	p.Headers = buildSection(ctx, plan.Headers, false, diags)
 	p.Cookies = buildSection(ctx, plan.Cookies, false, diags)
-	p.Path = buildSection(ctx, plan.Path, false, diags)
+	p.Path = buildPathSection(ctx, plan.Path, diags)
 	p.URL = buildURLSection(ctx, plan.URL, diags)
 	p.AllSections = buildSection(ctx, plan.AllSections, false, diags)
 	p.Decoding = buildDecoding(ctx, plan.Decoding, diags)
@@ -662,21 +793,57 @@ func buildSection(ctx context.Context, obj types.Object, useText bool, diags *di
 		EnableMaxLength: sm.EnableMaxLength.ValueBool(),
 	}
 
-	if names := buildEntryMatches(ctx, sm.Names, "names", diags); names != nil {
+	if names := buildEntryMatchesTypeA(ctx, sm.Names, "names", diags); names != nil {
 		section.Names = names
 	} else {
 		section.Names = []client.ContentFilterEntryMatch{}
 	}
 
 	if useText {
-		if text := buildEntryMatches(ctx, sm.Text, "text", diags); text != nil {
+		if text := buildEntryMatchesTypeA(ctx, sm.Text, "text", diags); text != nil {
 			section.Text = text
 		} else {
 			section.Text = []client.ContentFilterEntryMatch{}
 		}
 	}
 
-	if regex := buildEntryMatches(ctx, sm.Regex, "regex", diags); regex != nil {
+	if regex := buildEntryMatchesTypeA(ctx, sm.Regex, "regex", diags); regex != nil {
+		section.Regex = regex
+	} else {
+		section.Regex = []client.ContentFilterEntryMatch{}
+	}
+
+	return section
+}
+
+// buildPathSection converts the path section object (url/path-style entries) into the client struct.
+func buildPathSection(ctx context.Context, obj types.Object, diags *diag.Diagnostics) client.ContentFilterProfileSection {
+	if obj.IsNull() || obj.IsUnknown() {
+		return client.ContentFilterProfileSection{
+			MaxCount:  1,
+			MaxLength: 1024,
+			Names:     []client.ContentFilterEntryMatch{},
+			Regex:     []client.ContentFilterEntryMatch{},
+		}
+	}
+
+	var sm cfSectionModel
+	diags.Append(obj.As(ctx, &sm, basetypes.ObjectAsOptions{})...)
+
+	section := client.ContentFilterProfileSection{
+		MaxCount:        int(sm.MaxCount.ValueInt64()),
+		MaxLength:       int(sm.MaxLength.ValueInt64()),
+		EnableMaxCount:  sm.EnableMaxCount.ValueBool(),
+		EnableMaxLength: sm.EnableMaxLength.ValueBool(),
+	}
+
+	if names := buildEntryMatchesTypeB(ctx, sm.Names, "names", diags); names != nil {
+		section.Names = names
+	} else {
+		section.Names = []client.ContentFilterEntryMatch{}
+	}
+
+	if regex := buildEntryMatchesTypeB(ctx, sm.Regex, "regex", diags); regex != nil {
 		section.Regex = regex
 	} else {
 		section.Regex = []client.ContentFilterEntryMatch{}
@@ -706,13 +873,13 @@ func buildURLSection(ctx context.Context, obj types.Object, diags *diag.Diagnost
 		EnableMaxLength: sm.EnableMaxLength.ValueBool(),
 	}
 
-	if text := buildEntryMatches(ctx, sm.Text, "text", diags); text != nil {
+	if text := buildEntryMatchesTypeB(ctx, sm.Text, "text", diags); text != nil {
 		section.Text = text
 	} else {
 		section.Text = []client.ContentFilterEntryMatch{}
 	}
 
-	if regex := buildEntryMatches(ctx, sm.Regex, "regex", diags); regex != nil {
+	if regex := buildEntryMatchesTypeB(ctx, sm.Regex, "regex", diags); regex != nil {
 		section.Regex = regex
 	} else {
 		section.Regex = []client.ContentFilterEntryMatch{}
@@ -721,8 +888,8 @@ func buildURLSection(ctx context.Context, obj types.Object, diags *diag.Diagnost
 	return section
 }
 
-// buildEntryMatches converts a list of matcher objects into the client slice.
-func buildEntryMatches(ctx context.Context, list types.List, matchType string, diags *diag.Diagnostics) []client.ContentFilterEntryMatch {
+// buildEntryMatchesTypeA converts a list of parameter-style (Type A) matcher objects into the client slice.
+func buildEntryMatchesTypeA(ctx context.Context, list types.List, matchType string, diags *diag.Diagnostics) []client.ContentFilterEntryMatch {
 	if list.IsNull() || list.IsUnknown() {
 		return nil
 	}
@@ -742,12 +909,44 @@ func buildEntryMatches(ctx context.Context, list types.List, matchType string, d
 		out[i] = client.ContentFilterEntryMatch{
 			ID:              id,
 			Type:            matchType,
-			Key:             m.Key.ValueString(),
-			Reg:             m.Reg.ValueString(),
+			Key:             m.Parameter.ValueString(),
+			Reg:             m.Value.ValueString(),
 			Restrict:        m.Restrict.ValueBool(),
 			Mask:            m.Mask.ValueBool(),
+			CaseInsensitive: m.CaseInsensitive.ValueBool(),
+			Active:          m.Active.ValueBool(),
+		}
+		buildStringList(ctx, m.IgnoreCFRuleTags, &out[i].IgnoreCFRuleTags, diags)
+	}
+
+	return out
+}
+
+// buildEntryMatchesTypeB converts a list of url/path-style (Type B) matcher objects into the client slice.
+func buildEntryMatchesTypeB(ctx context.Context, list types.List, matchType string, diags *diag.Diagnostics) []client.ContentFilterEntryMatch {
+	if list.IsNull() || list.IsUnknown() {
+		return nil
+	}
+
+	var models []cfEntryMatchURLPathModel
+	diags.Append(list.ElementsAs(ctx, &models, false)...)
+	if diags.HasError() {
+		return nil
+	}
+
+	out := make([]client.ContentFilterEntryMatch, len(models))
+	for i, m := range models {
+		id := m.ID.ValueString()
+		if id == "" {
+			id = generateIDNoDash()
+		}
+		out[i] = client.ContentFilterEntryMatch{
+			ID:              id,
+			Type:            matchType,
 			Domain:          m.Domain.ValueString(),
 			Path:            m.Path.ValueString(),
+			Restrict:        m.Restrict.ValueBool(),
+			Mask:            m.Mask.ValueBool(),
 			CaseInsensitive: m.CaseInsensitive.ValueBool(),
 			Active:          m.Active.ValueBool(),
 		}
@@ -795,7 +994,7 @@ func (r *ContentFilterProfileResource) flattenProfile(ctx context.Context, p *cl
 	state.Args = flattenSection(ctx, p.Args, diags)
 	state.Headers = flattenSection(ctx, p.Headers, diags)
 	state.Cookies = flattenSection(ctx, p.Cookies, diags)
-	state.Path = flattenSection(ctx, p.Path, diags)
+	state.Path = flattenPathSection(ctx, p.Path, diags)
 	state.URL = flattenURLSection(ctx, p.URL, diags)
 	state.AllSections = flattenSection(ctx, p.AllSections, diags)
 	state.Decoding = flattenDecoding(p.Decoding)
@@ -818,9 +1017,24 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"names":             flattenEntryMatches(ctx, section.Names, diags),
-		"regex":             flattenEntryMatches(ctx, section.Regex, diags),
-		"text":              flattenEntryMatches(ctx, section.Text, diags),
+		"names":             flattenEntryMatchesTypeA(ctx, section.Names, diags),
+		"regex":             flattenEntryMatchesTypeA(ctx, section.Regex, diags),
+		"text":              flattenEntryMatchesTypeA(ctx, section.Text, diags),
+	})
+	diags.Append(d...)
+	return obj
+}
+
+// flattenPathSection builds the Terraform object value for the path section (url/path-style entries).
+func flattenPathSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
+	obj, d := types.ObjectValue(cfPathSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(int64(section.MaxCount)),
+		"max_length":        types.Int64Value(int64(section.MaxLength)),
+		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
+		"enable_max_length": types.BoolValue(section.EnableMaxLength),
+		"names":             flattenEntryMatchesTypeB(ctx, section.Names, diags),
+		"regex":             flattenEntryMatchesTypeB(ctx, section.Regex, diags),
+		"text":              flattenEntryMatchesTypeB(ctx, section.Text, diags),
 	})
 	diags.Append(d...)
 	return obj
@@ -833,15 +1047,15 @@ func flattenURLSection(ctx context.Context, section client.ContentFilterURLSecti
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"regex":             flattenEntryMatches(ctx, section.Regex, diags),
-		"text":              flattenEntryMatches(ctx, section.Text, diags),
+		"regex":             flattenEntryMatchesTypeB(ctx, section.Regex, diags),
+		"text":              flattenEntryMatchesTypeB(ctx, section.Text, diags),
 	})
 	diags.Append(d...)
 	return obj
 }
 
-// flattenEntryMatches builds the Terraform list value for matcher entries.
-func flattenEntryMatches(ctx context.Context, in []client.ContentFilterEntryMatch, diags *diag.Diagnostics) types.List {
+// flattenEntryMatchesTypeA builds the Terraform list value for parameter-style (Type A) matcher entries.
+func flattenEntryMatchesTypeA(ctx context.Context, in []client.ContentFilterEntryMatch, diags *diag.Diagnostics) types.List {
 	objType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
 	if len(in) == 0 {
 		return types.ListNull(objType)
@@ -851,8 +1065,32 @@ func flattenEntryMatches(ctx context.Context, in []client.ContentFilterEntryMatc
 	for i, m := range in {
 		models[i] = cfEntryMatchModel{
 			ID:               types.StringValue(m.ID),
-			Key:              types.StringValue(m.Key),
-			Reg:              types.StringValue(m.Reg),
+			Parameter:        types.StringValue(m.Key),
+			Value:            types.StringValue(m.Reg),
+			Restrict:         types.BoolValue(m.Restrict),
+			Mask:             types.BoolValue(m.Mask),
+			IgnoreCFRuleTags: flattenStringList(ctx, m.IgnoreCFRuleTags, diags),
+			CaseInsensitive:  types.BoolValue(m.CaseInsensitive),
+			Active:           types.BoolValue(m.Active),
+		}
+	}
+
+	lv, d := types.ListValueFrom(ctx, objType, models)
+	diags.Append(d...)
+	return lv
+}
+
+// flattenEntryMatchesTypeB builds the Terraform list value for url/path-style (Type B) matcher entries.
+func flattenEntryMatchesTypeB(ctx context.Context, in []client.ContentFilterEntryMatch, diags *diag.Diagnostics) types.List {
+	objType := types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}
+	if len(in) == 0 {
+		return types.ListNull(objType)
+	}
+
+	models := make([]cfEntryMatchURLPathModel, len(in))
+	for i, m := range in {
+		models[i] = cfEntryMatchURLPathModel{
+			ID:               types.StringValue(m.ID),
 			Restrict:         types.BoolValue(m.Restrict),
 			Mask:             types.BoolValue(m.Mask),
 			IgnoreCFRuleTags: flattenStringList(ctx, m.IgnoreCFRuleTags, diags),
