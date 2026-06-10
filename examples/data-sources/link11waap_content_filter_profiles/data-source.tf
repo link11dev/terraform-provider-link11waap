@@ -16,21 +16,11 @@ output "content_filter_profile_names" {
 }
 
 # Get a specific content filter profile by name
-data "link11waap_content_filter_profiles" "example_by_name" {
+data "link11waap_content_filter_profiles" "by_name" {
   config_id = data.link11waap_config.main.id
-  name      = "Default Content Filter Profile"
+  name      = link11waap_content_filter_profile.example.name
 }
 
 output "example_by_name" {
-  value = data.link11waap_content_filter_profiles.example_by_name
-}
-
-# Get a specific content filter profile by ID
-data "link11waap_content_filter_profiles" "example_by_id" {
-  config_id = data.link11waap_config.main.id
-  id        = "your-profile-id"
-}
-
-output "example_by_id" {
-  value = data.link11waap_content_filter_profiles.example_by_id
+  value = data.link11waap_content_filter_profiles.by_name.content_filter_profiles[0].id
 }
