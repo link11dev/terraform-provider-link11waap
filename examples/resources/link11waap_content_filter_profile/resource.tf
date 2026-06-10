@@ -11,7 +11,7 @@ resource "link11waap_content_filter_rule" "example_cf_rule" {
     name        = "My Block Malicious Domains"
     operand     = ".*\\.malicious\\.example\\.com$"
     risk        = 4
-    subcategory = "phishing1"
+    subcategory = "phishing-test"
     tags        = [
         "security-test",
         "malware-test",
