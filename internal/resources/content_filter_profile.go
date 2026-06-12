@@ -468,15 +468,6 @@ func cfPathSectionSchema(description string) schema.SingleNestedBlock {
 			objectvalidator.IsRequired(),
 		},
 	}
-	// if required {
-	// 	out.Required = true
-	// } else {
-	// 	out.Optional = true
-	// 	out.Computed = true
-	// 	out.PlanModifiers = []planmodifier.Object{
-	// 		objectplanmodifier.UseStateForUnknown(),
-	// 	}
-	// }
 	return out
 }
 
@@ -1029,17 +1020,6 @@ func flattenStringList(ctx context.Context, in []string, diags *diag.Diagnostics
 
 // flattenSection builds the Terraform object value for a section.
 func flattenSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
-	// If there are no names, no regex, and max_count/max_length are defaults,
-	// return a Null object so Terraform knows the block is absent.
-	// It's workaround to avoid Terraform treating an empty block as a block with default values,
-	// which would cause diffs when the API returns defaults for an empty block.
-	// if len(section.Names) == 0 && len(section.Regex) == 0 &&
-	// 	section.MaxCount <= 1 &&
-	// 	section.MaxLength <= 1024 &&
-	// 	!section.EnableMaxCount &&
-	// 	!section.EnableMaxLength {
-	// 	return types.ObjectNull(cfSectionAttrTypes())
-	// }
 	obj, d := types.ObjectValue(cfSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
@@ -1054,16 +1034,6 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 
 // flattenPathSection builds the Terraform object value for the path section (url/path-style entries).
 func flattenPathSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
-	// It's workaround to avoid Terraform treating an empty block as a block with default values,
-	// which would cause diffs when the API returns defaults for an empty block.
-	// if len(section.Names) == 0 && len(section.Regex) == 0 &&
-	// 	len(section.Text) == 0 &&
-	// 	section.MaxCount <= 1 &&
-	// 	section.MaxLength <= 1024 &&
-	// 	!section.EnableMaxCount &&
-	// 	!section.EnableMaxLength {
-	// 	return types.ObjectNull(cfPathSectionAttrTypes())
-	// }
 	obj, d := types.ObjectValue(cfPathSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
@@ -1079,14 +1049,6 @@ func flattenPathSection(ctx context.Context, section client.ContentFilterProfile
 
 // flattenURLSection builds the Terraform object value for the url section (no names).
 func flattenURLSection(ctx context.Context, section client.ContentFilterURLSection, diags *diag.Diagnostics) types.Object {
-	// It's workaround to avoid Terraform treating an empty block as a block with default values,
-	// which would cause diffs when the API returns defaults for an empty block.
-	// if len(section.Regex) == 0 && len(section.Text) == 0 &&
-	// 	section.MaxCount <= 1 &&
-	// 	section.MaxLength <= 1024 &&
-	// 	!section.EnableMaxCount && !section.EnableMaxLength {
-	// 	return types.ObjectNull(cfURLSectionAttrTypes())
-	// }
 	obj, d := types.ObjectValue(cfURLSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
