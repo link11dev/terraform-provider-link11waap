@@ -398,7 +398,6 @@ func cfSectionTfType() tftypes.Object {
 		"enable_max_length": tftypes.Bool,
 		"names":             entryList,
 		"regex":             entryList,
-		"text":              entryList,
 	}}
 }
 
@@ -413,7 +412,6 @@ func cfSectionTfValue() tftypes.Value {
 		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
 		"names":             tftypes.NewValue(entryList, nil),
 		"regex":             tftypes.NewValue(entryList, nil),
-		"text":              tftypes.NewValue(entryList, nil),
 	})
 }
 

@@ -23,7 +23,6 @@ func emptySectionObject() types.Object {
 		"enable_max_length": types.BoolValue(false),
 		"names":             types.ListNull(objType),
 		"regex":             types.ListNull(objType),
-		"text":              types.ListNull(objType),
 	})
 }
 
@@ -87,11 +86,17 @@ func TestContentFilterProfileResource_Schema(t *testing.T) {
 	expectedAttrs := []string{
 		"config_id", "id", "name", "description", "ignore_alphanum", "masking_seed",
 		"content_type", "graphql_path", "ignore_body", "active", "report", "ignore",
-		"tags", "action", "args", "headers", "cookies", "path", "url", "allsections", "decoding",
+		"tags", "action",
 	}
 	for _, attr := range expectedAttrs {
 		_, ok := s.Attributes[attr]
 		assert.True(t, ok, "expected attribute %q in schema", attr)
+	}
+
+	expectedBlocks := []string{"args", "headers", "cookies", "path", "url", "allsections", "decoding"}
+	for _, block := range expectedBlocks {
+		_, ok := s.Blocks[block]
+		assert.True(t, ok, "expected block %q in schema", block)
 	}
 }
 
@@ -111,12 +116,16 @@ func TestContentFilterProfileResource_Schema_SectionNested(t *testing.T) {
 	resp := schemaResp()
 	r.Schema(context.Background(), schemaReq(), resp)
 
-	args, ok := resp.Schema.Attributes["args"].(schema.SingleNestedAttribute)
-	require.True(t, ok, "args attribute should be SingleNestedAttribute")
-	assert.True(t, args.Required)
-	for _, attr := range []string{"max_count", "max_length", "enable_max_count", "enable_max_length", "names", "regex", "text"} {
+	args, ok := resp.Schema.Blocks["args"].(schema.SingleNestedBlock)
+	require.True(t, ok, "args block should be SingleNestedBlock")
+	assert.NotEmpty(t, args.Validators, "args block should have validators (IsRequired)")
+	for _, attr := range []string{"max_count", "max_length", "enable_max_count", "enable_max_length"} {
 		_, ok := args.Attributes[attr]
 		assert.True(t, ok, "expected args attribute %q", attr)
+	}
+	for _, block := range []string{"names", "regex"} {
+		_, ok := args.Blocks[block]
+		assert.True(t, ok, "expected args sub-block %q", block)
 	}
 }
 
@@ -150,7 +159,7 @@ func TestContentFilterProfileResource_ImportState_TooManyParts(t *testing.T) {
 
 func TestCfSectionAttrTypes(t *testing.T) {
 	m := cfSectionAttrTypes()
-	for _, k := range []string{"max_count", "max_length", "enable_max_count", "enable_max_length", "names", "regex", "text"} {
+	for _, k := range []string{"max_count", "max_length", "enable_max_count", "enable_max_length", "names", "regex"} {
 		_, ok := m[k]
 		assert.True(t, ok, "expected attr type %q", k)
 	}
@@ -263,7 +272,6 @@ func TestContentFilterProfileResource_buildProfile_PopulatedSections(t *testing.
 		"enable_max_length": types.BoolValue(true),
 		"names":             namesList,
 		"regex":             types.ListNull(entryObjType),
-		"text":              types.ListNull(entryObjType),
 	})
 
 	decoding := types.ObjectValueMust(cfDecodingAttrTypes(), map[string]attr.Value{
