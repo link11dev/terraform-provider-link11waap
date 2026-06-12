@@ -26,8 +26,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &ContentFilterProfileResource{}
-	_ resource.ResourceWithImportState = &ContentFilterProfileResource{}
+	_ resource.Resource                     = &ContentFilterProfileResource{}
+	_ resource.ResourceWithImportState      = &ContentFilterProfileResource{}
+	_ resource.ResourceWithConfigValidators = &ContentFilterProfileResource{}
 )
 
 // ContentFilterProfileResource implements the content filter profile resource.
@@ -470,6 +471,64 @@ func cfPathSectionSchema(description string) schema.SingleNestedBlock {
 	return out
 }
 
+// cfDecodingBlockSchema returns a SingleNestedBlock for the decoding flags.
+func cfDecodingBlockSchema() schema.SingleNestedBlock {
+	return schema.SingleNestedBlock{
+		Description: "Decoding flags.",
+		Attributes: map[string]schema.Attribute{
+			"base64": schema.BoolAttribute{
+				Description: "Enable base64 decoding.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(true),
+			},
+			"dual": schema.BoolAttribute{
+				Description: "Enable dual decoding.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"html": schema.BoolAttribute{
+				Description: "Enable HTML entity decoding.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"unicode": schema.BoolAttribute{
+				Description: "Enable unicode decoding.",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+		},
+	}
+}
+
+type decodingRequiredValidator struct{}
+
+func (decodingRequiredValidator) Description(_ context.Context) string {
+	return "decoding block is required"
+}
+
+func (decodingRequiredValidator) MarkdownDescription(_ context.Context) string {
+	return "decoding block is required"
+}
+
+func (decodingRequiredValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var decoding types.Object
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("decoding"), &decoding)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if decoding.IsNull() || decoding.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("decoding"),
+			"Missing Required Block",
+			"The decoding block is required.",
+		)
+	}
+}
+
 // NewContentFilterProfileResource creates a new content filter profile resource instance.
 func NewContentFilterProfileResource() resource.Resource {
 	return &ContentFilterProfileResource{}
@@ -565,36 +624,6 @@ func (r *ContentFilterProfileResource) Schema(_ context.Context, _ resource.Sche
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 			},
-			"decoding": schema.SingleNestedAttribute{
-				Description: "Decoding flags.",
-				Required:    true,
-				Attributes: map[string]schema.Attribute{
-					"base64": schema.BoolAttribute{
-						Description: "Enable base64 decoding.",
-						Optional:    true,
-						Computed:    true,
-						Default:     booldefault.StaticBool(true),
-					},
-					"dual": schema.BoolAttribute{
-						Description: "Enable dual decoding.",
-						Optional:    true,
-						Computed:    true,
-						Default:     booldefault.StaticBool(false),
-					},
-					"html": schema.BoolAttribute{
-						Description: "Enable HTML entity decoding.",
-						Optional:    true,
-						Computed:    true,
-						Default:     booldefault.StaticBool(false),
-					},
-					"unicode": schema.BoolAttribute{
-						Description: "Enable unicode decoding.",
-						Optional:    true,
-						Computed:    true,
-						Default:     booldefault.StaticBool(false),
-					},
-				},
-			},
 		},
 		Blocks: map[string]schema.Block{
 			"args":        cfSectionSchema("Arguments section."),
@@ -603,6 +632,7 @@ func (r *ContentFilterProfileResource) Schema(_ context.Context, _ resource.Sche
 			"path":        cfPathSectionSchema("Path section."),
 			"url":         cfURLSectionSchema("URL section."),
 			"allsections": cfSectionSchema("All sections section."),
+			"decoding":    cfDecodingBlockSchema(),
 		},
 	}
 }
@@ -734,6 +764,13 @@ func (r *ContentFilterProfileResource) ImportState(ctx context.Context, req reso
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
+}
+
+// ConfigValidators enforces that the decoding block is always provided.
+func (r *ContentFilterProfileResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		decodingRequiredValidator{},
+	}
 }
 
 // buildProfile maps the plan model into the API client struct.
