@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/objectvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -26,9 +27,8 @@ import (
 )
 
 var (
-	_ resource.Resource                     = &ContentFilterProfileResource{}
-	_ resource.ResourceWithImportState      = &ContentFilterProfileResource{}
-	_ resource.ResourceWithConfigValidators = &ContentFilterProfileResource{}
+	_ resource.Resource                = &ContentFilterProfileResource{}
+	_ resource.ResourceWithImportState = &ContentFilterProfileResource{}
 )
 
 // ContentFilterProfileResource implements the content filter profile resource.
@@ -355,6 +355,9 @@ func cfSectionSchema(description string) schema.SingleNestedBlock {
 		PlanModifiers: []planmodifier.Object{
 			objectplanmodifier.UseStateForUnknown(),
 		},
+		Validators: []validator.Object{
+			objectvalidator.IsRequired(),
+		},
 	}
 	return out
 }
@@ -370,6 +373,9 @@ func cfURLSectionSchema(description string) schema.SingleNestedBlock {
 		Description: description,
 		PlanModifiers: []planmodifier.Object{
 			objectplanmodifier.UseStateForUnknown(),
+		},
+		Validators: []validator.Object{
+			objectvalidator.IsRequired(),
 		},
 		Attributes: map[string]schema.Attribute{
 			"max_count": schema.Int64Attribute{
@@ -458,6 +464,9 @@ func cfPathSectionSchema(description string) schema.SingleNestedBlock {
 			"regex": entryList,
 			"text":  entryList,
 		},
+		Validators: []validator.Object{
+			objectvalidator.IsRequired(),
+		},
 	}
 	// if required {
 	// 	out.Required = true
@@ -475,6 +484,9 @@ func cfPathSectionSchema(description string) schema.SingleNestedBlock {
 func cfDecodingBlockSchema() schema.SingleNestedBlock {
 	return schema.SingleNestedBlock{
 		Description: "Decoding flags.",
+		Validators: []validator.Object{
+			objectvalidator.IsRequired(),
+		},
 		Attributes: map[string]schema.Attribute{
 			"base64": schema.BoolAttribute{
 				Description: "Enable base64 decoding.",
@@ -501,31 +513,6 @@ func cfDecodingBlockSchema() schema.SingleNestedBlock {
 				Default:     booldefault.StaticBool(false),
 			},
 		},
-	}
-}
-
-type decodingRequiredValidator struct{}
-
-func (decodingRequiredValidator) Description(_ context.Context) string {
-	return "decoding block is required"
-}
-
-func (decodingRequiredValidator) MarkdownDescription(_ context.Context) string {
-	return "decoding block is required"
-}
-
-func (decodingRequiredValidator) ValidateResource(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
-	var decoding types.Object
-	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("decoding"), &decoding)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	if decoding.IsNull() || decoding.IsUnknown() {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("decoding"),
-			"Missing Required Block",
-			"The decoding block is required.",
-		)
 	}
 }
 
@@ -764,13 +751,6 @@ func (r *ContentFilterProfileResource) ImportState(ctx context.Context, req reso
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
-}
-
-// ConfigValidators enforces that the decoding block is always provided.
-func (r *ContentFilterProfileResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
-	return []resource.ConfigValidator{
-		decodingRequiredValidator{},
-	}
 }
 
 // buildProfile maps the plan model into the API client struct.
@@ -1053,13 +1033,13 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 	// return a Null object so Terraform knows the block is absent.
 	// It's workaround to avoid Terraform treating an empty block as a block with default values,
 	// which would cause diffs when the API returns defaults for an empty block.
-	if len(section.Names) == 0 && len(section.Regex) == 0 &&
-		section.MaxCount <= 1 &&
-		section.MaxLength <= 1024 &&
-		!section.EnableMaxCount &&
-		!section.EnableMaxLength {
-		return types.ObjectNull(cfSectionAttrTypes())
-	}
+	// if len(section.Names) == 0 && len(section.Regex) == 0 &&
+	// 	section.MaxCount <= 1 &&
+	// 	section.MaxLength <= 1024 &&
+	// 	!section.EnableMaxCount &&
+	// 	!section.EnableMaxLength {
+	// 	return types.ObjectNull(cfSectionAttrTypes())
+	// }
 	obj, d := types.ObjectValue(cfSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
@@ -1076,14 +1056,14 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 func flattenPathSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
 	// It's workaround to avoid Terraform treating an empty block as a block with default values,
 	// which would cause diffs when the API returns defaults for an empty block.
-	if len(section.Names) == 0 && len(section.Regex) == 0 &&
-		len(section.Text) == 0 &&
-		section.MaxCount <= 1 &&
-		section.MaxLength <= 1024 &&
-		!section.EnableMaxCount &&
-		!section.EnableMaxLength {
-		return types.ObjectNull(cfPathSectionAttrTypes())
-	}
+	// if len(section.Names) == 0 && len(section.Regex) == 0 &&
+	// 	len(section.Text) == 0 &&
+	// 	section.MaxCount <= 1 &&
+	// 	section.MaxLength <= 1024 &&
+	// 	!section.EnableMaxCount &&
+	// 	!section.EnableMaxLength {
+	// 	return types.ObjectNull(cfPathSectionAttrTypes())
+	// }
 	obj, d := types.ObjectValue(cfPathSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
@@ -1101,12 +1081,12 @@ func flattenPathSection(ctx context.Context, section client.ContentFilterProfile
 func flattenURLSection(ctx context.Context, section client.ContentFilterURLSection, diags *diag.Diagnostics) types.Object {
 	// It's workaround to avoid Terraform treating an empty block as a block with default values,
 	// which would cause diffs when the API returns defaults for an empty block.
-	if len(section.Regex) == 0 && len(section.Text) == 0 &&
-		section.MaxCount <= 1 &&
-		section.MaxLength <= 1024 &&
-		!section.EnableMaxCount && !section.EnableMaxLength {
-		return types.ObjectNull(cfURLSectionAttrTypes())
-	}
+	// if len(section.Regex) == 0 && len(section.Text) == 0 &&
+	// 	section.MaxCount <= 1 &&
+	// 	section.MaxLength <= 1024 &&
+	// 	!section.EnableMaxCount && !section.EnableMaxLength {
+	// 	return types.ObjectNull(cfURLSectionAttrTypes())
+	// }
 	obj, d := types.ObjectValue(cfURLSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
