@@ -17,6 +17,50 @@ Manages a Content Filter Profile in Link11 WAAP.
 
 data "link11waap_config" "main" {}
 
+# This is a simple example of a content filter profile
+resource "link11waap_content_filter_profile" "simple_example" {
+  config_id    = data.link11waap_config.main.id
+  name         = "Simple Content Filter Profile"
+  description  = "Simple content filter profile"
+  masking_seed = "some-random-seed"
+
+  tags            = ["my-tag"]
+
+  allsections {
+    max_count         = 1
+    max_length        = 1024
+  }
+
+  args {
+    max_count         = 1
+    max_length        = 1024
+  }
+
+  headers {
+    max_count         = 1
+    max_length        = 1024
+  }
+
+  cookies {
+    max_count         = 32
+    max_length        = 512
+  }
+
+  decoding {
+    base64  = true
+  }
+
+  url {
+    max_count        = 1
+    max_length       = 1024
+  }
+  path {
+    max_length        = 1024
+    enable_max_length = true
+  }
+}
+
+
 # Example content filter rule that can be referenced in the profile
 resource "link11waap_content_filter_rule" "example_cf_rule" {
     category    = "malware"
@@ -33,7 +77,7 @@ resource "link11waap_content_filter_rule" "example_cf_rule" {
     ]
 }
 
-# Example content filter profile that references the above rule
+# Example of advanced content filter profile with various settings and referencing the above rule
 # Here is documentation about Content Filter Profiles:
 # https://waap.docs.link11.com/console-walkthrough/security/content-filter/profiles
 
@@ -53,129 +97,118 @@ resource "link11waap_content_filter_profile" "example_cf_profile" {
   ignore = ["apple-crawler"]
   report = ["cf-rule-category:sqli"]
 
-  allsections = {
+  allsections {
     max_count         = 512
     max_length        = 1024
     enable_max_count  = true
     enable_max_length = true
-
-    names = [
-      {
-        parameter  = "my-data"
-        value      = "data_value"
-        mask             = true
-        active           = true
-        case_insensitive = true
-      }
-    ]
-
-    regex = [
-      {
-        parameter = "secret_token"
-        value     = "^secret_token_.*$"
-        active    = true
-      }
-    ]
+    names {
+      parameter        = "example-arg"
+      value            = "one-two-three"
+      mask             = true
+      active           = true
+      case_insensitive = true
+    }
+    regex {
+      parameter   = "secret_token"
+      value       = "^secret_token_.*$"
+      active      = true
+    }
   }
-  args = {
+
+  args {
     max_count         = 512
     max_length        = 1024
     enable_max_count  = true
     enable_max_length = true
-
-    names = [
-      {
-        parameter = "super-arg"
-        value     = "abcdevf"
-        mask             = true
-        active           = true
-        case_insensitive = true
-      },
-      {
-        parameter = "another-arg"
-        value     = "another_value"
-        mask             = false
-        active           = false
-        case_insensitive = false
-      }
-    ]
-
-    regex = [
-      {
-        parameter = "token"
-        value     = "^token_.*$"
-        active    = true
-      }
-    ]
+    names {
+      parameter        = "super-arg"
+      value            = "abcdevf"
+      mask             = true
+      active           = true
+      case_insensitive = true
+    }
+    names {
+      parameter        = "another-arg"
+      value            = "another_value"
+      mask             = false
+      active           = false
+      case_insensitive = false
+    }
+    regex {
+      parameter   = "token"
+      value       = "^token_.*$"
+      active = true
+    }
   }
 
-  headers = {
+  headers {
     max_count         = 64
     max_length        = 1024
     enable_max_count  = true
     enable_max_length = true
-    names = [
-      {
-        parameter = "My-Header"
-        value     = "header_value"
-        mask             = true
-        active           = true
-        case_insensitive = true
-      }
-    ]
-    regex = [
-      {
-        parameter = "X-Forwarded-For"
-        value     = "^192\\.168\\..*$"
-        active    = true
-      }
-    ]
+    names {
+      parameter        = "My-Header"
+      value            = "header_value"
+      mask             = true
+      active           = true
+      case_insensitive = true
+    }
+    regex {
+      parameter   = "X-Forwarded-For"
+      value       = "^192\\.168\\..*$"
+      active      = true
+    }
   }
 
-  cookies = {
+  cookies {
     max_count         = 32
     max_length        = 512
     enable_max_count  = true
     enable_max_length = true
-    regex = [
-      {
-        parameter = "session_id"
-        value     = "^sess_.*$"
-        active    = true
-      }
-    ]
+    regex {
+      parameter = "session_id"
+      value     = "^sess_.*$"
+      active    = true
+    }
   }
 
-  decoding = {
+  decoding {
     base64  = true
     dual    = false
     html    = false
     unicode = false
   }
 
-  url = {
-    max_count        = 1
-    max_length       = 1024
-    text = [{
-      active = false
-      case_insensitive = false
+  url {
+    max_count   = 1
+    max_length  = 1024
+    text {
+      active            = false
+      case_insensitive  = false
+      mask              = false
+      path              = "/data"
+      domain            = "test.com"
       ignore_cf_rule_tags = ["cf-rule-name:100001"]
-      mask = false
-      path = "/data"
-      domain = "test.com"
-      key = "url"
-      reg = "^/data$"
-    }]
-    regex = [{
-      active = true
-      case_insensitive = false
-      mask = false
-      path = "/data.*js$"
-      domain = "^test1.com$"
+    }
+    text {
+      active            = true
+      case_insensitive  = false
+      mask              = false
+      path              = "/my-uri"
+      domain            = "test-example.com"
+      ignore_cf_rule_tags = ["cf-rule-name:100002"]
+    }
+    regex {
+      active            = true
+      case_insensitive  = false
+      mask              = false
+      path              = "/data.*js$"
+      domain            = "^test1.com$"
       ignore_cf_rule_tags = [link11waap_content_filter_rule.example_cf_rule.tags[1]]
-    }]
+    }
   }
-  path = {
+  path {
     max_length        = 1024
     enable_max_length = true
   }
@@ -187,20 +220,21 @@ resource "link11waap_content_filter_profile" "example_cf_profile" {
 
 ### Required
 
-- `args` (Attributes) Arguments section. (see [below for nested schema](#nestedatt--args))
 - `config_id` (String) The configuration ID.
-- `cookies` (Attributes) Cookies section. (see [below for nested schema](#nestedatt--cookies))
-- `decoding` (Attributes) Decoding flags. (see [below for nested schema](#nestedatt--decoding))
-- `headers` (Attributes) Headers section. (see [below for nested schema](#nestedatt--headers))
 - `masking_seed` (String) Seed used when masking values.
 - `name` (String) The name of the content filter profile.
-- `path` (Attributes) Path section. (see [below for nested schema](#nestedatt--path))
+- `allsections` (Block) All sections section. (see [below for nested schema](#nestedblock--allsections))
+- `args` (Block) Arguments section. (see [below for nested schema](#nestedblock--args))
+- `cookies` (Block) Cookies section. (see [below for nested schema](#nestedblock--cookies))
+- `decoding` (Block) Decoding flags. (see [below for nested schema](#nestedblock--decoding))
+- `headers` (Block) Headers section. (see [below for nested schema](#nestedblock--headers))
+- `path` (Block) Path section. (see [below for nested schema](#nestedblock--path))
+- `url` (Block) URL section. (see [below for nested schema](#nestedblock--url))
 
 ### Optional
 
 - `action` (String) Action id or name applied by the profile.
 - `active` (List of String) List of active tags.
-- `allsections` (Attributes) All sections section. (see [below for nested schema](#nestedatt--allsections))
 - `content_type` (List of String) List of content types.
 - `description` (String) Description of the content filter profile.
 - `graphql_path` (String) JSONPath of the GraphQL property.
@@ -209,13 +243,61 @@ resource "link11waap_content_filter_profile" "example_cf_profile" {
 - `ignore_body` (Boolean) Whether to ignore the request body.
 - `report` (List of String) List of report tags.
 - `tags` (List of String) List of tags to apply.
-- `url` (Attributes) URL section. (see [below for nested schema](#nestedatt--url))
 
 ### Read-Only
 
 - `id` (String) The unique identifier for the content filter profile.
 
-<a id="nestedatt--args"></a>
+<a id="nestedblock--allsections"></a>
+### Nested Schema for `allsections`
+
+Optional:
+
+- `enable_max_count` (Boolean) Enable max-count enforcement.
+- `enable_max_length` (Boolean) Enable max-length enforcement.
+- `max_count` (Number) Maximum number of items of this section type allowed.
+- `max_length` (Number) Maximum number of characters per item.
+- `names` (Block List) (see [below for nested schema](#nestedblock--allsections--names))
+- `regex` (Block List) (see [below for nested schema](#nestedblock--allsections--regex))
+
+<a id="nestedblock--allsections--names"></a>
+### Nested Schema for `allsections.names`
+
+Required:
+
+- `parameter` (String) Exact name to match.
+- `value` (String) Regular expression to match.
+
+Optional:
+
+- `active` (Boolean) Whether the entry is active.
+- `case_insensitive` (Boolean) Whether matching is case insensitive.
+- `id` (String) Unique identifier for the entry, generated by the provider.
+- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
+- `mask` (Boolean) Whether to mask the matched value.
+- `restrict` (Boolean) Whether the matched entry is restricted.
+
+
+<a id="nestedblock--allsections--regex"></a>
+### Nested Schema for `allsections.regex`
+
+Required:
+
+- `parameter` (String) Exact name to match.
+- `value` (String) Regular expression to match.
+
+Optional:
+
+- `active` (Boolean) Whether the entry is active.
+- `case_insensitive` (Boolean) Whether matching is case insensitive.
+- `id` (String) Unique identifier for the entry, generated by the provider.
+- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
+- `mask` (Boolean) Whether to mask the matched value.
+- `restrict` (Boolean) Whether the matched entry is restricted.
+
+
+
+<a id="nestedblock--args"></a>
 ### Nested Schema for `args`
 
 Optional:
@@ -224,11 +306,10 @@ Optional:
 - `enable_max_length` (Boolean) Enable max-length enforcement.
 - `max_count` (Number) Maximum number of items of this section type allowed.
 - `max_length` (Number) Maximum number of characters per item.
-- `names` (Attributes List) (see [below for nested schema](#nestedatt--args--names))
-- `regex` (Attributes List) (see [below for nested schema](#nestedatt--args--regex))
-- `text` (Attributes List) (see [below for nested schema](#nestedatt--args--text))
+- `names` (Block List) (see [below for nested schema](#nestedblock--args--names))
+- `regex` (Block List) (see [below for nested schema](#nestedblock--args--regex))
 
-<a id="nestedatt--args--names"></a>
+<a id="nestedblock--args--names"></a>
 ### Nested Schema for `args.names`
 
 Required:
@@ -246,7 +327,7 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--args--regex"></a>
+<a id="nestedblock--args--regex"></a>
 ### Nested Schema for `args.regex`
 
 Required:
@@ -264,26 +345,8 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--args--text"></a>
-### Nested Schema for `args.text`
 
-Required:
-
-- `parameter` (String) Exact name to match.
-- `value` (String) Regular expression to match.
-
-Optional:
-
-- `active` (Boolean) Whether the entry is active.
-- `case_insensitive` (Boolean) Whether matching is case insensitive.
-- `id` (String) Unique identifier for the entry, generated by the provider.
-- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
-- `mask` (Boolean) Whether to mask the matched value.
-- `restrict` (Boolean) Whether the matched entry is restricted.
-
-
-
-<a id="nestedatt--cookies"></a>
+<a id="nestedblock--cookies"></a>
 ### Nested Schema for `cookies`
 
 Optional:
@@ -292,11 +355,10 @@ Optional:
 - `enable_max_length` (Boolean) Enable max-length enforcement.
 - `max_count` (Number) Maximum number of items of this section type allowed.
 - `max_length` (Number) Maximum number of characters per item.
-- `names` (Attributes List) (see [below for nested schema](#nestedatt--cookies--names))
-- `regex` (Attributes List) (see [below for nested schema](#nestedatt--cookies--regex))
-- `text` (Attributes List) (see [below for nested schema](#nestedatt--cookies--text))
+- `names` (Block List) (see [below for nested schema](#nestedblock--cookies--names))
+- `regex` (Block List) (see [below for nested schema](#nestedblock--cookies--regex))
 
-<a id="nestedatt--cookies--names"></a>
+<a id="nestedblock--cookies--names"></a>
 ### Nested Schema for `cookies.names`
 
 Required:
@@ -314,7 +376,7 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--cookies--regex"></a>
+<a id="nestedblock--cookies--regex"></a>
 ### Nested Schema for `cookies.regex`
 
 Required:
@@ -332,26 +394,8 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--cookies--text"></a>
-### Nested Schema for `cookies.text`
 
-Required:
-
-- `parameter` (String) Exact name to match.
-- `value` (String) Regular expression to match.
-
-Optional:
-
-- `active` (Boolean) Whether the entry is active.
-- `case_insensitive` (Boolean) Whether matching is case insensitive.
-- `id` (String) Unique identifier for the entry, generated by the provider.
-- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
-- `mask` (Boolean) Whether to mask the matched value.
-- `restrict` (Boolean) Whether the matched entry is restricted.
-
-
-
-<a id="nestedatt--decoding"></a>
+<a id="nestedblock--decoding"></a>
 ### Nested Schema for `decoding`
 
 Optional:
@@ -362,7 +406,7 @@ Optional:
 - `unicode` (Boolean) Enable unicode decoding.
 
 
-<a id="nestedatt--headers"></a>
+<a id="nestedblock--headers"></a>
 ### Nested Schema for `headers`
 
 Optional:
@@ -371,11 +415,10 @@ Optional:
 - `enable_max_length` (Boolean) Enable max-length enforcement.
 - `max_count` (Number) Maximum number of items of this section type allowed.
 - `max_length` (Number) Maximum number of characters per item.
-- `names` (Attributes List) (see [below for nested schema](#nestedatt--headers--names))
-- `regex` (Attributes List) (see [below for nested schema](#nestedatt--headers--regex))
-- `text` (Attributes List) (see [below for nested schema](#nestedatt--headers--text))
+- `names` (Block List) (see [below for nested schema](#nestedblock--headers--names))
+- `regex` (Block List) (see [below for nested schema](#nestedblock--headers--regex))
 
-<a id="nestedatt--headers--names"></a>
+<a id="nestedblock--headers--names"></a>
 ### Nested Schema for `headers.names`
 
 Required:
@@ -393,7 +436,7 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--headers--regex"></a>
+<a id="nestedblock--headers--regex"></a>
 ### Nested Schema for `headers.regex`
 
 Required:
@@ -411,26 +454,8 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--headers--text"></a>
-### Nested Schema for `headers.text`
 
-Required:
-
-- `parameter` (String) Exact name to match.
-- `value` (String) Regular expression to match.
-
-Optional:
-
-- `active` (Boolean) Whether the entry is active.
-- `case_insensitive` (Boolean) Whether matching is case insensitive.
-- `id` (String) Unique identifier for the entry, generated by the provider.
-- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
-- `mask` (Boolean) Whether to mask the matched value.
-- `restrict` (Boolean) Whether the matched entry is restricted.
-
-
-
-<a id="nestedatt--path"></a>
+<a id="nestedblock--path"></a>
 ### Nested Schema for `path`
 
 Optional:
@@ -439,11 +464,11 @@ Optional:
 - `enable_max_length` (Boolean) Enable max-length enforcement.
 - `max_count` (Number) Maximum number of items of this section type allowed.
 - `max_length` (Number) Maximum number of characters per item.
-- `names` (Attributes List) (see [below for nested schema](#nestedatt--path--names))
-- `regex` (Attributes List) (see [below for nested schema](#nestedatt--path--regex))
-- `text` (Attributes List) (see [below for nested schema](#nestedatt--path--text))
+- `names` (Block List) (see [below for nested schema](#nestedblock--path--names))
+- `regex` (Block List) (see [below for nested schema](#nestedblock--path--regex))
+- `text` (Block List) (see [below for nested schema](#nestedblock--path--text))
 
-<a id="nestedatt--path--names"></a>
+<a id="nestedblock--path--names"></a>
 ### Nested Schema for `path.names`
 
 Required:
@@ -461,7 +486,7 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--path--regex"></a>
+<a id="nestedblock--path--regex"></a>
 ### Nested Schema for `path.regex`
 
 Required:
@@ -479,7 +504,7 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--path--text"></a>
+<a id="nestedblock--path--text"></a>
 ### Nested Schema for `path.text`
 
 Required:
@@ -498,75 +523,7 @@ Optional:
 
 
 
-<a id="nestedatt--allsections"></a>
-### Nested Schema for `allsections`
-
-Optional:
-
-- `enable_max_count` (Boolean) Enable max-count enforcement.
-- `enable_max_length` (Boolean) Enable max-length enforcement.
-- `max_count` (Number) Maximum number of items of this section type allowed.
-- `max_length` (Number) Maximum number of characters per item.
-- `names` (Attributes List) (see [below for nested schema](#nestedatt--allsections--names))
-- `regex` (Attributes List) (see [below for nested schema](#nestedatt--allsections--regex))
-- `text` (Attributes List) (see [below for nested schema](#nestedatt--allsections--text))
-
-<a id="nestedatt--allsections--names"></a>
-### Nested Schema for `allsections.names`
-
-Required:
-
-- `parameter` (String) Exact name to match.
-- `value` (String) Regular expression to match.
-
-Optional:
-
-- `active` (Boolean) Whether the entry is active.
-- `case_insensitive` (Boolean) Whether matching is case insensitive.
-- `id` (String) Unique identifier for the entry, generated by the provider.
-- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
-- `mask` (Boolean) Whether to mask the matched value.
-- `restrict` (Boolean) Whether the matched entry is restricted.
-
-
-<a id="nestedatt--allsections--regex"></a>
-### Nested Schema for `allsections.regex`
-
-Required:
-
-- `parameter` (String) Exact name to match.
-- `value` (String) Regular expression to match.
-
-Optional:
-
-- `active` (Boolean) Whether the entry is active.
-- `case_insensitive` (Boolean) Whether matching is case insensitive.
-- `id` (String) Unique identifier for the entry, generated by the provider.
-- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
-- `mask` (Boolean) Whether to mask the matched value.
-- `restrict` (Boolean) Whether the matched entry is restricted.
-
-
-<a id="nestedatt--allsections--text"></a>
-### Nested Schema for `allsections.text`
-
-Required:
-
-- `parameter` (String) Exact name to match.
-- `value` (String) Regular expression to match.
-
-Optional:
-
-- `active` (Boolean) Whether the entry is active.
-- `case_insensitive` (Boolean) Whether matching is case insensitive.
-- `id` (String) Unique identifier for the entry, generated by the provider.
-- `ignore_cf_rule_tags` (List of String) Content filter rule tags to exclude.
-- `mask` (Boolean) Whether to mask the matched value.
-- `restrict` (Boolean) Whether the matched entry is restricted.
-
-
-
-<a id="nestedatt--url"></a>
+<a id="nestedblock--url"></a>
 ### Nested Schema for `url`
 
 Optional:
@@ -575,10 +532,10 @@ Optional:
 - `enable_max_length` (Boolean) Enable max-length enforcement.
 - `max_count` (Number) Maximum number of items of this section type allowed.
 - `max_length` (Number) Maximum number of characters per item.
-- `regex` (Attributes List) (see [below for nested schema](#nestedatt--url--regex))
-- `text` (Attributes List) (see [below for nested schema](#nestedatt--url--text))
+- `regex` (Block List) (see [below for nested schema](#nestedblock--url--regex))
+- `text` (Block List) (see [below for nested schema](#nestedblock--url--text))
 
-<a id="nestedatt--url--regex"></a>
+<a id="nestedblock--url--regex"></a>
 ### Nested Schema for `url.regex`
 
 Required:
@@ -596,7 +553,7 @@ Optional:
 - `restrict` (Boolean) Whether the matched entry is restricted.
 
 
-<a id="nestedatt--url--text"></a>
+<a id="nestedblock--url--text"></a>
 ### Nested Schema for `url.text`
 
 Required:
