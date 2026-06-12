@@ -104,6 +104,17 @@ type cfURLSectionModel struct {
 	Text            types.List  `tfsdk:"text"`
 }
 
+// cfPathSectionModel mirrors the path section (names + regex + text).
+type cfPathSectionModel struct {
+	MaxCount        types.Int64 `tfsdk:"max_count"`
+	MaxLength       types.Int64 `tfsdk:"max_length"`
+	EnableMaxCount  types.Bool  `tfsdk:"enable_max_count"`
+	EnableMaxLength types.Bool  `tfsdk:"enable_max_length"`
+	Names           types.List  `tfsdk:"names"`
+	Regex           types.List  `tfsdk:"regex"`
+	Text            types.List  `tfsdk:"text"`
+}
+
 // cfDecodingModel mirrors the decoding object schema.
 type cfDecodingModel struct {
 	Base64  types.Bool `tfsdk:"base64"`
@@ -293,10 +304,10 @@ func cfEntryMatchURLPathSchemaAttrs() map[string]schema.Attribute {
 }
 
 // cfSectionSchema returns a SingleNestedAttribute describing a profile section.
-func cfSectionSchema(description string, required bool) schema.SingleNestedAttribute {
-	entryList := schema.ListNestedAttribute{
-		Optional: true,
-		NestedObject: schema.NestedAttributeObject{
+func cfSectionSchema(description string) schema.SingleNestedBlock {
+	entryList := schema.ListNestedBlock{
+		// Optional: true,
+		NestedObject: schema.NestedBlockObject{
 			Attributes: cfEntryMatchSchemaAttrs(),
 		},
 	}
@@ -331,37 +342,30 @@ func cfSectionSchema(description string, required bool) schema.SingleNestedAttri
 			Computed:    true,
 			Default:     booldefault.StaticBool(false),
 		},
-		"names": entryList,
-		"regex": entryList,
 	}
 
-	out := schema.SingleNestedAttribute{
+	out := schema.SingleNestedBlock{
 		Description: description,
 		Attributes:  attrs,
-	}
-	if required {
-		out.Required = true
-	} else {
-		out.Optional = true
-		out.Computed = true
-		out.PlanModifiers = []planmodifier.Object{
+		Blocks: map[string]schema.Block{
+			"names": entryList,
+			"regex": entryList,
+		},
+		PlanModifiers: []planmodifier.Object{
 			objectplanmodifier.UseStateForUnknown(),
-		}
+		},
 	}
 	return out
 }
 
-// cfURLSectionSchema returns a SingleNestedAttribute for the url section (no names).
-func cfURLSectionSchema(description string) schema.SingleNestedAttribute {
-	entryList := schema.ListNestedAttribute{
-		Optional: true,
-		NestedObject: schema.NestedAttributeObject{
+// cfURLSectionSchema returns a SingleNestedBlock for the url section (no names).
+func cfURLSectionSchema(description string) schema.SingleNestedBlock {
+	entryList := schema.ListNestedBlock{
+		NestedObject: schema.NestedBlockObject{
 			Attributes: cfEntryMatchURLPathSchemaAttrs(),
 		},
 	}
-	return schema.SingleNestedAttribute{
-		Optional:    true,
-		Computed:    true,
+	return schema.SingleNestedBlock{
 		Description: description,
 		PlanModifiers: []planmodifier.Object{
 			objectplanmodifier.UseStateForUnknown(),
@@ -397,6 +401,8 @@ func cfURLSectionSchema(description string) schema.SingleNestedAttribute {
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
 			},
+		},
+		Blocks: map[string]schema.Block{
 			"regex": entryList,
 			"text":  entryList,
 		},
@@ -404,10 +410,9 @@ func cfURLSectionSchema(description string) schema.SingleNestedAttribute {
 }
 
 // cfPathSectionSchema returns a SingleNestedAttribute describing the path section (url/path-style entries).
-func cfPathSectionSchema(description string, required bool) schema.SingleNestedAttribute {
-	entryList := schema.ListNestedAttribute{
-		Optional: true,
-		NestedObject: schema.NestedAttributeObject{
+func cfPathSectionSchema(description string) schema.SingleNestedBlock {
+	entryList := schema.ListNestedBlock{
+		NestedObject: schema.NestedBlockObject{
 			Attributes: cfEntryMatchURLPathSchemaAttrs(),
 		},
 	}
@@ -442,24 +447,26 @@ func cfPathSectionSchema(description string, required bool) schema.SingleNestedA
 			Computed:    true,
 			Default:     booldefault.StaticBool(false),
 		},
-		"names": entryList,
-		"regex": entryList,
-		"text":  entryList,
 	}
 
-	out := schema.SingleNestedAttribute{
+	out := schema.SingleNestedBlock{
 		Description: description,
 		Attributes:  attrs,
+		Blocks: map[string]schema.Block{
+			"names": entryList,
+			"regex": entryList,
+			"text":  entryList,
+		},
 	}
-	if required {
-		out.Required = true
-	} else {
-		out.Optional = true
-		out.Computed = true
-		out.PlanModifiers = []planmodifier.Object{
-			objectplanmodifier.UseStateForUnknown(),
-		}
-	}
+	// if required {
+	// 	out.Required = true
+	// } else {
+	// 	out.Optional = true
+	// 	out.Computed = true
+	// 	out.PlanModifiers = []planmodifier.Object{
+	// 		objectplanmodifier.UseStateForUnknown(),
+	// 	}
+	// }
 	return out
 }
 
@@ -558,12 +565,6 @@ func (r *ContentFilterProfileResource) Schema(_ context.Context, _ resource.Sche
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 			},
-			"args":        cfSectionSchema("Arguments section.", true),
-			"headers":     cfSectionSchema("Headers section.", true),
-			"cookies":     cfSectionSchema("Cookies section.", true),
-			"path":        cfPathSectionSchema("Path section.", true),
-			"url":         cfURLSectionSchema("URL section."),
-			"allsections": cfSectionSchema("All sections section.", false),
 			"decoding": schema.SingleNestedAttribute{
 				Description: "Decoding flags.",
 				Required:    true,
@@ -594,6 +595,14 @@ func (r *ContentFilterProfileResource) Schema(_ context.Context, _ resource.Sche
 					},
 				},
 			},
+		},
+		Blocks: map[string]schema.Block{
+			"args":        cfSectionSchema("Arguments section."),
+			"headers":     cfSectionSchema("Headers section."),
+			"cookies":     cfSectionSchema("Cookies section."),
+			"path":        cfPathSectionSchema("Path section."),
+			"url":         cfURLSectionSchema("URL section."),
+			"allsections": cfSectionSchema("All sections section."),
 		},
 	}
 }
@@ -808,10 +817,11 @@ func buildPathSection(ctx context.Context, obj types.Object, diags *diag.Diagnos
 			MaxLength: 1024,
 			Names:     []client.ContentFilterEntryMatch{},
 			Regex:     []client.ContentFilterEntryMatch{},
+			Text:      []client.ContentFilterEntryMatch{},
 		}
 	}
 
-	var sm cfSectionModel
+	var sm cfPathSectionModel
 	diags.Append(obj.As(ctx, &sm, basetypes.ObjectAsOptions{})...)
 
 	section := client.ContentFilterProfileSection{
@@ -831,6 +841,12 @@ func buildPathSection(ctx context.Context, obj types.Object, diags *diag.Diagnos
 		section.Regex = regex
 	} else {
 		section.Regex = []client.ContentFilterEntryMatch{}
+	}
+
+	if text := buildEntryMatchesTypeB(ctx, sm.Text, "text", diags); text != nil {
+		section.Text = text
+	} else {
+		section.Text = []client.ContentFilterEntryMatch{}
 	}
 
 	return section
@@ -996,13 +1012,24 @@ func flattenStringList(ctx context.Context, in []string, diags *diag.Diagnostics
 
 // flattenSection builds the Terraform object value for a section.
 func flattenSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
+	// If there are no names, no regex, and max_count/max_length are defaults,
+	// return a Null object so Terraform knows the block is absent.
+	// It's workaround to avoid Terraform treating an empty block as a block with default values,
+	// which would cause diffs when the API returns defaults for an empty block.
+	if len(section.Names) == 0 && len(section.Regex) == 0 &&
+		section.MaxCount <= 1 &&
+		section.MaxLength <= 1024 &&
+		!section.EnableMaxCount &&
+		!section.EnableMaxLength {
+		return types.ObjectNull(cfSectionAttrTypes())
+	}
 	obj, d := types.ObjectValue(cfSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"names": flattenEntryMatchesTypeA(ctx, section.Names, diags),
-		"regex": flattenEntryMatchesTypeA(ctx, section.Regex, diags),
+		"names":             flattenEntryMatchesTypeA(ctx, section.Names, diags),
+		"regex":             flattenEntryMatchesTypeA(ctx, section.Regex, diags),
 	})
 	diags.Append(d...)
 	return obj
@@ -1010,6 +1037,16 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 
 // flattenPathSection builds the Terraform object value for the path section (url/path-style entries).
 func flattenPathSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
+	// It's workaround to avoid Terraform treating an empty block as a block with default values,
+	// which would cause diffs when the API returns defaults for an empty block.
+	if len(section.Names) == 0 && len(section.Regex) == 0 &&
+		len(section.Text) == 0 &&
+		section.MaxCount <= 1 &&
+		section.MaxLength <= 1024 &&
+		!section.EnableMaxCount &&
+		!section.EnableMaxLength {
+		return types.ObjectNull(cfPathSectionAttrTypes())
+	}
 	obj, d := types.ObjectValue(cfPathSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
@@ -1025,6 +1062,14 @@ func flattenPathSection(ctx context.Context, section client.ContentFilterProfile
 
 // flattenURLSection builds the Terraform object value for the url section (no names).
 func flattenURLSection(ctx context.Context, section client.ContentFilterURLSection, diags *diag.Diagnostics) types.Object {
+	// It's workaround to avoid Terraform treating an empty block as a block with default values,
+	// which would cause diffs when the API returns defaults for an empty block.
+	if len(section.Regex) == 0 && len(section.Text) == 0 &&
+		section.MaxCount <= 1 &&
+		section.MaxLength <= 1024 &&
+		!section.EnableMaxCount && !section.EnableMaxLength {
+		return types.ObjectNull(cfURLSectionAttrTypes())
+	}
 	obj, d := types.ObjectValue(cfURLSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
