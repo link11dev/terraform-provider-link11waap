@@ -92,7 +92,6 @@ type cfSectionModel struct {
 	EnableMaxLength types.Bool  `tfsdk:"enable_max_length"`
 	Names           types.List  `tfsdk:"names"`
 	Regex           types.List  `tfsdk:"regex"`
-	Text            types.List  `tfsdk:"text"`
 }
 
 // cfURLSectionModel mirrors the url section (no names).
@@ -151,7 +150,6 @@ func cfSectionAttrTypes() map[string]attr.Type {
 		"enable_max_length": types.BoolType,
 		"names":             entryList,
 		"regex":             entryList,
-		"text":              entryList,
 	}
 }
 
@@ -335,7 +333,6 @@ func cfSectionSchema(description string, required bool) schema.SingleNestedAttri
 		},
 		"names": entryList,
 		"regex": entryList,
-		"text":  entryList,
 	}
 
 	out := schema.SingleNestedAttribute{
@@ -749,12 +746,12 @@ func (r *ContentFilterProfileResource) buildProfile(ctx context.Context, plan *C
 	buildStringList(ctx, plan.Ignore, &p.Ignore, diags)
 	buildStringList(ctx, plan.Tags, &p.Tags, diags)
 
-	p.Args = buildSection(ctx, plan.Args, false, diags)
-	p.Headers = buildSection(ctx, plan.Headers, false, diags)
-	p.Cookies = buildSection(ctx, plan.Cookies, false, diags)
+	p.Args = buildSection(ctx, plan.Args, diags)
+	p.Headers = buildSection(ctx, plan.Headers, diags)
+	p.Cookies = buildSection(ctx, plan.Cookies, diags)
 	p.Path = buildPathSection(ctx, plan.Path, diags)
 	p.URL = buildURLSection(ctx, plan.URL, diags)
-	p.AllSections = buildSection(ctx, plan.AllSections, false, diags)
+	p.AllSections = buildSection(ctx, plan.AllSections, diags)
 	p.Decoding = buildDecoding(ctx, plan.Decoding, diags)
 
 	return p
@@ -768,19 +765,14 @@ func buildStringList(ctx context.Context, list types.List, dst *[]string, diags 
 }
 
 // buildSection converts a section object into the client struct.
-// useText additionally populates the "text" entry list (url section); all sections always include "names".
-func buildSection(ctx context.Context, obj types.Object, useText bool, diags *diag.Diagnostics) client.ContentFilterProfileSection {
+func buildSection(ctx context.Context, obj types.Object, diags *diag.Diagnostics) client.ContentFilterProfileSection {
 	if obj.IsNull() || obj.IsUnknown() {
-		section := client.ContentFilterProfileSection{
+		return client.ContentFilterProfileSection{
 			MaxCount:  1,
 			MaxLength: 1024,
 			Names:     []client.ContentFilterEntryMatch{},
 			Regex:     []client.ContentFilterEntryMatch{},
 		}
-		if useText {
-			section.Text = []client.ContentFilterEntryMatch{}
-		}
-		return section
 	}
 
 	var sm cfSectionModel
@@ -797,14 +789,6 @@ func buildSection(ctx context.Context, obj types.Object, useText bool, diags *di
 		section.Names = names
 	} else {
 		section.Names = []client.ContentFilterEntryMatch{}
-	}
-
-	if useText {
-		if text := buildEntryMatchesTypeA(ctx, sm.Text, "text", diags); text != nil {
-			section.Text = text
-		} else {
-			section.Text = []client.ContentFilterEntryMatch{}
-		}
 	}
 
 	if regex := buildEntryMatchesTypeA(ctx, sm.Regex, "regex", diags); regex != nil {
@@ -1017,9 +1001,8 @@ func flattenSection(ctx context.Context, section client.ContentFilterProfileSect
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"names":             flattenEntryMatchesTypeA(ctx, section.Names, diags),
-		"regex":             flattenEntryMatchesTypeA(ctx, section.Regex, diags),
-		"text":              flattenEntryMatchesTypeA(ctx, section.Text, diags),
+		"names": flattenEntryMatchesTypeA(ctx, section.Names, diags),
+		"regex": flattenEntryMatchesTypeA(ctx, section.Regex, diags),
 	})
 	diags.Append(d...)
 	return obj
