@@ -2,6 +2,50 @@
 
 data "link11waap_config" "main" {}
 
+# This is a simple example of a content filter profile
+resource "link11waap_content_filter_profile" "simple_example" {
+  config_id    = data.link11waap_config.main.id
+  name         = "Simple Content Filter Profile"
+  description  = "Simple content filter profile"
+  masking_seed = "some-random-seed"
+
+  tags            = ["my-tag"]
+
+  allsections {
+    max_count         = 1
+    max_length        = 1024
+  }
+
+  args {
+    max_count         = 1
+    max_length        = 1024
+  }
+
+  headers {
+    max_count         = 1
+    max_length        = 1024
+  }
+
+  cookies {
+    max_count         = 32
+    max_length        = 512
+  }
+
+  decoding {
+    base64  = true
+  }
+
+  url {
+    max_count        = 1
+    max_length       = 1024
+  }
+  path {
+    max_length        = 1024
+    enable_max_length = true
+  }
+}
+
+
 # Example content filter rule that can be referenced in the profile
 resource "link11waap_content_filter_rule" "example_cf_rule" {
     category    = "malware"
@@ -18,7 +62,7 @@ resource "link11waap_content_filter_rule" "example_cf_rule" {
     ]
 }
 
-# Example content filter profile that references the above rule
+# Example of advanced content filter profile with various settings and referencing the above rule
 # Here is documentation about Content Filter Profiles:
 # https://waap.docs.link11.com/console-walkthrough/security/content-filter/profiles
 
@@ -38,129 +82,118 @@ resource "link11waap_content_filter_profile" "example_cf_profile" {
   ignore = ["apple-crawler"]
   report = ["cf-rule-category:sqli"]
 
-  allsections = {
+  allsections {
     max_count         = 512
     max_length        = 1024
     enable_max_count  = true
     enable_max_length = true
-
-    names = [
-      {
-        parameter  = "my-data"
-        value      = "data_value"
-        mask             = true
-        active           = true
-        case_insensitive = true
-      }
-    ]
-
-    regex = [
-      {
-        parameter = "secret_token"
-        value     = "^secret_token_.*$"
-        active    = true
-      }
-    ]
+    names {
+      parameter        = "example-arg"
+      value            = "one-two-three"
+      mask             = true
+      active           = true
+      case_insensitive = true
+    }
+    regex {
+      parameter   = "secret_token"
+      value       = "^secret_token_.*$"
+      active      = true
+    }
   }
-  args = {
+
+  args {
     max_count         = 512
     max_length        = 1024
     enable_max_count  = true
     enable_max_length = true
-
-    names = [
-      {
-        parameter = "super-arg"
-        value     = "abcdevf"
-        mask             = true
-        active           = true
-        case_insensitive = true
-      },
-      {
-        parameter = "another-arg"
-        value     = "another_value"
-        mask             = false
-        active           = false
-        case_insensitive = false
-      }
-    ]
-
-    regex = [
-      {
-        parameter = "token"
-        value     = "^token_.*$"
-        active    = true
-      }
-    ]
+    names {
+      parameter        = "super-arg"
+      value            = "abcdevf"
+      mask             = true
+      active           = true
+      case_insensitive = true
+    }
+    names {
+      parameter        = "another-arg"
+      value            = "another_value"
+      mask             = false
+      active           = false
+      case_insensitive = false
+    }
+    regex {
+      parameter   = "token"
+      value       = "^token_.*$"
+      active = true
+    }
   }
 
-  headers = {
+  headers {
     max_count         = 64
     max_length        = 1024
     enable_max_count  = true
     enable_max_length = true
-    names = [
-      {
-        parameter = "My-Header"
-        value     = "header_value"
-        mask             = true
-        active           = true
-        case_insensitive = true
-      }
-    ]
-    regex = [
-      {
-        parameter = "X-Forwarded-For"
-        value     = "^192\\.168\\..*$"
-        active    = true
-      }
-    ]
+    names {
+      parameter        = "My-Header"
+      value            = "header_value"
+      mask             = true
+      active           = true
+      case_insensitive = true
+    }
+    regex {
+      parameter   = "X-Forwarded-For"
+      value       = "^192\\.168\\..*$"
+      active      = true
+    }
   }
 
-  cookies = {
+  cookies {
     max_count         = 32
     max_length        = 512
     enable_max_count  = true
     enable_max_length = true
-    regex = [
-      {
-        parameter = "session_id"
-        value     = "^sess_.*$"
-        active    = true
-      }
-    ]
+    regex {
+      parameter = "session_id"
+      value     = "^sess_.*$"
+      active    = true
+    }
   }
 
-  decoding = {
+  decoding {
     base64  = true
     dual    = false
     html    = false
     unicode = false
   }
 
-  url = {
-    max_count        = 1
-    max_length       = 1024
-    text = [{
-      active = false
-      case_insensitive = false
+  url {
+    max_count   = 1
+    max_length  = 1024
+    text {
+      active            = false
+      case_insensitive  = false
+      mask              = false
+      path              = "/data"
+      domain            = "test.com"
       ignore_cf_rule_tags = ["cf-rule-name:100001"]
-      mask = false
-      path = "/data"
-      domain = "test.com"
-      key = "url"
-      reg = "^/data$"
-    }]
-    regex = [{
-      active = true
-      case_insensitive = false
-      mask = false
-      path = "/data.*js$"
-      domain = "^test1.com$"
+    }
+    text {
+      active            = true
+      case_insensitive  = false
+      mask              = false
+      path              = "/my-uri"
+      domain            = "test-example.com"
+      ignore_cf_rule_tags = ["cf-rule-name:100002"]
+    }
+    regex {
+      active            = true
+      case_insensitive  = false
+      mask              = false
+      path              = "/data.*js$"
+      domain            = "^test1.com$"
       ignore_cf_rule_tags = [link11waap_content_filter_rule.example_cf_rule.tags[1]]
-    }]
+    }
   }
-  path = {
+  path {
     max_length        = 1024
     enable_max_length = true
   }
