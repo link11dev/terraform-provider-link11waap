@@ -3,9 +3,11 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -22,8 +24,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &GlobalFilterResource{}
-	_ resource.ResourceWithImportState = &GlobalFilterResource{}
+	_ resource.Resource                   = &GlobalFilterResource{}
+	_ resource.ResourceWithImportState    = &GlobalFilterResource{}
+	_ resource.ResourceWithValidateConfig = &GlobalFilterResource{}
 )
 
 // GlobalFilterResource implements the global filter resource.
@@ -47,9 +50,10 @@ type GlobalFilterResourceModel struct {
 
 // RuleModel describes the rule block for a global filter.
 type RuleModel struct {
-	Relation types.String `tfsdk:"relation"`
-	Entries  []EntryModel `tfsdk:"entry"`
-	Groups   []GroupModel `tfsdk:"group"`
+	Relation    types.String         `tfsdk:"relation"`
+	Entries     []EntryModel         `tfsdk:"entry"`
+	Groups      []GroupModel         `tfsdk:"group"`
+	EntriesJSON jsontypes.Normalized `tfsdk:"entries_json"`
 }
 
 // EntryModel describes a leaf condition entry in a rule.
@@ -161,6 +165,11 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 						Validators: []validator.String{
 							stringvalidator.OneOf("OR", "AND"),
 						},
+					},
+					"entries_json": schema.StringAttribute{
+						CustomType:  jsontypes.NormalizedType{},
+						Optional:    true,
+						Description: "The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' and 'group' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is a mixed array of leaf entries ([type, value, comment] or [type, [name, value], comment]) and group objects ({\"relation\": \"AND|OR\", \"entries\": [...]}). Mutually exclusive with 'entry' and 'group' blocks within the same rule. Typically supplied with file(\"...\").",
 					},
 				},
 				Blocks: map[string]schema.Block{
@@ -326,7 +335,7 @@ func (r *GlobalFilterResource) Read(ctx context.Context, req resource.ReadReques
 	state.Action = types.StringValue(action)
 
 	// Rule: interface{} -> RuleModel
-	ruleModel, parseErr := apiRuleToModel(filter.Rule)
+	ruleModel, parseErr := apiRuleToModel(filter.Rule, state.Rule)
 	if parseErr != nil {
 		resp.Diagnostics.AddError("Error Parsing Rule", parseErr.Error())
 		return
@@ -397,6 +406,27 @@ func (r *GlobalFilterResource) ImportState(ctx context.Context, req resource.Imp
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
 }
 
+// ValidateConfig enforces that entries_json is mutually exclusive with entry/group blocks within a rule.
+func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config GlobalFilterResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() || config.Rule == nil {
+		return
+	}
+
+	rule := config.Rule
+	jsonSet := !rule.EntriesJSON.IsNull() && !rule.EntriesJSON.IsUnknown() && rule.EntriesJSON.ValueString() != ""
+	blocksSet := len(rule.Entries) > 0 || len(rule.Groups) > 0
+
+	if jsonSet && blocksSet {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("rule").AtName("entries_json"),
+			"Conflicting rule entry definitions",
+			"'entries_json' is mutually exclusive with 'entry' and 'group' blocks within a rule. Use either entries_json (for large filters) or entry/group blocks, not both.",
+		)
+	}
+}
+
 // buildGlobalFilterAPIModel converts the Terraform resource model to the API model.
 func buildGlobalFilterAPIModel(ctx context.Context, plan *GlobalFilterResourceModel) (*client.GlobalFilter, diag.Diagnostics) {
 	var diags diag.Diagnostics
@@ -418,17 +448,37 @@ func buildGlobalFilterAPIModel(ctx context.Context, plan *GlobalFilterResourceMo
 	filter.Action = plan.Action.ValueString()
 
 	// Rule: RuleModel -> API wire format
-	filter.Rule = ruleModelToAPI(plan.Rule)
+	rule, ruleDiags := ruleModelToAPI(plan.Rule)
+	diags.Append(ruleDiags...)
+	filter.Rule = rule
 
 	return filter, diags
 }
 
 // ruleModelToAPI converts a RuleModel to the API wire format (interface{} ready for JSON marshal).
 // Entries appear before groups in the entries array.
-func ruleModelToAPI(rule *RuleModel) interface{} {
+func ruleModelToAPI(rule *RuleModel) (interface{}, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	if rule == nil {
-		return nil
+		return nil, diags
 	}
+
+	if !rule.EntriesJSON.IsNull() && !rule.EntriesJSON.IsUnknown() && rule.EntriesJSON.ValueString() != "" {
+		var entries []interface{}
+		if err := json.Unmarshal([]byte(rule.EntriesJSON.ValueString()), &entries); err != nil {
+			diags.AddAttributeError(
+				path.Root("rule").AtName("entries_json"),
+				"Invalid entries_json",
+				"Could not parse entries_json as a JSON array: "+err.Error(),
+			)
+			return nil, diags
+		}
+		return map[string]interface{}{
+			"relation": rule.Relation.ValueString(),
+			"entries":  entries,
+		}, diags
+	}
+
 	entries := make([]interface{}, 0)
 	for _, e := range rule.Entries {
 		entries = append(entries, entryModelToAPI(e))
@@ -439,7 +489,7 @@ func ruleModelToAPI(rule *RuleModel) interface{} {
 	return map[string]interface{}{
 		"relation": rule.Relation.ValueString(),
 		"entries":  entries,
-	}
+	}, diags
 }
 
 func entryModelToAPI(e EntryModel) interface{} {
@@ -469,8 +519,9 @@ func groupModelToAPI(g GroupModel) interface{} {
 }
 
 // apiRuleToModel parses the API response into a RuleModel.
-// Returns nil, nil when rawRule is nil.
-func apiRuleToModel(rawRule interface{}) (*RuleModel, error) {
+// Returns nil, nil when rawRule is nil. When the prior state used entries_json,
+// the rule's entries are serialized back into entries_json instead of block form.
+func apiRuleToModel(rawRule interface{}, prior *RuleModel) (*RuleModel, error) {
 	if rawRule == nil {
 		return nil, nil
 	}
@@ -478,11 +529,29 @@ func apiRuleToModel(rawRule interface{}) (*RuleModel, error) {
 	if !ok {
 		return nil, fmt.Errorf("rule is not an object, got %T", rawRule)
 	}
-	model := &RuleModel{}
+	model := &RuleModel{EntriesJSON: jsontypes.NewNormalizedNull()}
 	if rel, ok := ruleMap["relation"].(string); ok {
 		model.Relation = types.StringValue(rel)
 	}
 	rawEntries, _ := ruleMap["entries"].([]interface{})
+
+	priorUsedJSON := prior != nil &&
+		!prior.EntriesJSON.IsNull() &&
+		!prior.EntriesJSON.IsUnknown() &&
+		prior.EntriesJSON.ValueString() != ""
+
+	if priorUsedJSON {
+		if rawEntries == nil {
+			rawEntries = []interface{}{}
+		}
+		b, err := json.Marshal(rawEntries)
+		if err != nil {
+			return nil, fmt.Errorf("marshal entries to entries_json: %w", err)
+		}
+		model.EntriesJSON = jsontypes.NewNormalizedValue(string(b))
+		return model, nil
+	}
+
 	for _, rawEntry := range rawEntries {
 		switch e := rawEntry.(type) {
 		case []interface{}:
