@@ -66,8 +66,9 @@ type EntryModel struct {
 
 // GroupModel describes a nested rule group.
 type GroupModel struct {
-	Relation types.String `tfsdk:"relation"`
-	Entries  []EntryModel `tfsdk:"entry"`
+	Relation    types.String         `tfsdk:"relation"`
+	Entries     []EntryModel         `tfsdk:"entry"`
+	EntriesJSON jsontypes.Normalized `tfsdk:"entries_json"`
 }
 
 // NewGlobalFilterResource creates a new global filter resource instance.
@@ -213,6 +214,11 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 									Validators: []validator.String{
 										stringvalidator.OneOf("OR", "AND"),
 									},
+								},
+								"entries_json": schema.StringAttribute{
+									CustomType:  jsontypes.NormalizedType{},
+									Optional:    true,
+									Description: "The group's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Mutually exclusive with 'entry' blocks within the same group.",
 								},
 							},
 							Blocks: map[string]schema.Block{
@@ -425,6 +431,17 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 			"'entries_json' is mutually exclusive with 'entry' and 'group' blocks within a rule. Use either entries_json (for large filters) or entry/group blocks, not both.",
 		)
 	}
+
+	for i, g := range rule.Groups {
+		gJSONSet := !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown() && g.EntriesJSON.ValueString() != ""
+		if gJSONSet && len(g.Entries) > 0 {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("rule").AtName("group").AtListIndex(i).AtName("entries_json"),
+				"Conflicting group entry definitions",
+				"'entries_json' is mutually exclusive with 'entry' blocks within the same group.",
+			)
+		}
+	}
 }
 
 // buildGlobalFilterAPIModel converts the Terraform resource model to the API model.
@@ -484,7 +501,11 @@ func ruleModelToAPI(rule *RuleModel) (interface{}, diag.Diagnostics) {
 		entries = append(entries, entryModelToAPI(e))
 	}
 	for _, g := range rule.Groups {
-		entries = append(entries, groupModelToAPI(g))
+		gEntry, gDiags := groupModelToAPI(g)
+		diags.Append(gDiags...)
+		if !gDiags.HasError() {
+			entries = append(entries, gEntry)
+		}
 	}
 	return map[string]interface{}{
 		"relation": rule.Relation.ValueString(),
@@ -507,7 +528,19 @@ func entryModelToAPI(e EntryModel) interface{} {
 	return []interface{}{e.Type.ValueString(), e.Value.ValueString(), comment}
 }
 
-func groupModelToAPI(g GroupModel) interface{} {
+func groupModelToAPI(g GroupModel) (interface{}, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown() && g.EntriesJSON.ValueString() != "" {
+		var entries []interface{}
+		if err := json.Unmarshal([]byte(g.EntriesJSON.ValueString()), &entries); err != nil {
+			diags.AddError("Invalid group entries_json", "Could not parse group entries_json as a JSON array: "+err.Error())
+			return nil, diags
+		}
+		return map[string]interface{}{
+			"relation": g.Relation.ValueString(),
+			"entries":  entries,
+		}, diags
+	}
 	entries := make([]interface{}, 0)
 	for _, e := range g.Entries {
 		entries = append(entries, entryModelToAPI(e))
@@ -515,7 +548,7 @@ func groupModelToAPI(g GroupModel) interface{} {
 	return map[string]interface{}{
 		"relation": g.Relation.ValueString(),
 		"entries":  entries,
-	}
+	}, diags
 }
 
 // apiRuleToModel parses the API response into a RuleModel.
@@ -552,6 +585,7 @@ func apiRuleToModel(rawRule interface{}, prior *RuleModel) (*RuleModel, error) {
 		return model, nil
 	}
 
+	groupIdx := 0
 	for _, rawEntry := range rawEntries {
 		switch e := rawEntry.(type) {
 		case []interface{}:
@@ -561,11 +595,16 @@ func apiRuleToModel(rawRule interface{}, prior *RuleModel) (*RuleModel, error) {
 			}
 			model.Entries = append(model.Entries, em)
 		case map[string]interface{}:
-			gm, err := apiGroupToModel(e)
+			var priorGroup *GroupModel
+			if prior != nil && groupIdx < len(prior.Groups) {
+				priorGroup = &prior.Groups[groupIdx]
+			}
+			gm, err := apiGroupToModel(e, priorGroup)
 			if err != nil {
 				return nil, err
 			}
 			model.Groups = append(model.Groups, *gm)
+			groupIdx++
 		}
 	}
 	return model, nil
@@ -604,12 +643,30 @@ func apiEntryToModel(raw []interface{}) (EntryModel, error) {
 	return em, nil
 }
 
-func apiGroupToModel(raw map[string]interface{}) (*GroupModel, error) {
-	gm := &GroupModel{}
+func apiGroupToModel(raw map[string]interface{}, prior *GroupModel) (*GroupModel, error) {
+	gm := &GroupModel{EntriesJSON: jsontypes.NewNormalizedNull()}
 	if rel, ok := raw["relation"].(string); ok {
 		gm.Relation = types.StringValue(rel)
 	}
 	rawEntries, _ := raw["entries"].([]interface{})
+
+	priorUsedJSON := prior != nil &&
+		!prior.EntriesJSON.IsNull() &&
+		!prior.EntriesJSON.IsUnknown() &&
+		prior.EntriesJSON.ValueString() != ""
+
+	if priorUsedJSON {
+		if rawEntries == nil {
+			rawEntries = []interface{}{}
+		}
+		b, err := json.Marshal(rawEntries)
+		if err != nil {
+			return nil, fmt.Errorf("marshal group entries to entries_json: %w", err)
+		}
+		gm.EntriesJSON = jsontypes.NewNormalizedValue(string(b))
+		return gm, nil
+	}
+
 	for _, rawEntry := range rawEntries {
 		if entryArr, ok := rawEntry.([]interface{}); ok {
 			em, err := apiEntryToModel(entryArr)

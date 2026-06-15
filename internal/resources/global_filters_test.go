@@ -23,8 +23,9 @@ var entryObjectType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 
 // groupObjectType is the tftypes object shape for a group block.
 var groupObjectType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-	"relation": tftypes.String,
-	"entry":    tftypes.List{ElementType: entryObjectType},
+	"relation":     tftypes.String,
+	"entries_json": tftypes.String,
+	"entry":        tftypes.List{ElementType: entryObjectType},
 }}
 
 // ruleObjectType is the tftypes object shape for the rule block.
@@ -843,4 +844,184 @@ func TestBuildGlobalFilterAPIModel_CookiesNamedEntry(t *testing.T) {
 	assert.Equal(t, "test", nameVal[0])
 	assert.Equal(t, "ddddd", nameVal[1])
 	assert.Equal(t, "dddd", entry[2])
+}
+
+func TestBuildGlobalFilterAPIModel_GroupWithEntriesJSON(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &GlobalFilterResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		ID:          types.StringValue("gf1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Active:      types.BoolValue(true),
+		Tags:        types.ListNull(types.StringType),
+		Action:      types.StringValue("action-monitor"),
+		Rule: &RuleModel{
+			Relation: types.StringValue("AND"),
+			Groups: []GroupModel{
+				{
+					Relation:    types.StringValue("OR"),
+					EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/admin/","Admin paths"],["uri","/.+\\.php","PHP files"]]`),
+				},
+			},
+		},
+	}
+
+	filter, diags := buildGlobalFilterAPIModel(ctx, plan)
+	require.False(t, diags.HasError())
+
+	ruleMap := filter.Rule.(map[string]interface{})
+	entries := ruleMap["entries"].([]interface{})
+	require.Len(t, entries, 1)
+
+	group := entries[0].(map[string]interface{})
+	assert.Equal(t, "OR", group["relation"])
+	groupEntries := group["entries"].([]interface{})
+	require.Len(t, groupEntries, 2)
+
+	e0 := groupEntries[0].([]interface{})
+	assert.Equal(t, "path", e0[0])
+	assert.Equal(t, "/admin/", e0[1])
+
+	e1 := groupEntries[1].([]interface{})
+	assert.Equal(t, "uri", e1[0])
+}
+
+func TestApiRuleToModel_GroupPriorUsedJSON(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "AND",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"relation": "OR",
+				"entries": []interface{}{
+					[]interface{}{"path", "/admin/", "Admin paths"},
+					[]interface{}{"uri", `/.+\.php`, "PHP files"},
+				},
+			},
+		},
+	}
+
+	prior := &RuleModel{
+		Relation: types.StringValue("AND"),
+		Groups: []GroupModel{
+			{
+				Relation:    types.StringValue("OR"),
+				EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/old/",""]]`),
+			},
+		},
+	}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.Len(t, model.Groups, 1)
+
+	g := model.Groups[0]
+	assert.Equal(t, "OR", g.Relation.ValueString())
+	assert.Empty(t, g.Entries)
+	assert.False(t, g.EntriesJSON.IsNull())
+
+	expected := jsontypes.NewNormalizedValue(`[["path","/admin/","Admin paths"],["uri","/.+\\.php","PHP files"]]`)
+	eq, eqDiags := g.EntriesJSON.StringSemanticEquals(context.Background(), expected)
+	require.False(t, eqDiags.HasError())
+	assert.True(t, eq)
+}
+
+func TestApiRuleToModel_GroupPriorUsedBlocksKeepsBlocks(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "AND",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"relation": "OR",
+				"entries": []interface{}{
+					[]interface{}{"path", "/admin/", ""},
+				},
+			},
+		},
+	}
+
+	prior := &RuleModel{
+		Relation: types.StringValue("AND"),
+		Groups: []GroupModel{
+			{
+				Relation:    types.StringValue("OR"),
+				EntriesJSON: jsontypes.NewNormalizedNull(),
+			},
+		},
+	}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.Len(t, model.Groups, 1)
+
+	g := model.Groups[0]
+	assert.True(t, g.EntriesJSON.IsNull())
+	require.Len(t, g.Entries, 1)
+	assert.Equal(t, "path", g.Entries[0].Type.ValueString())
+}
+
+func TestGlobalFilterResource_ValidateConfig_GroupMutualExclusion(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	ej := `[["path","/api/",""]]`
+
+	groupWithBoth := tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "OR"),
+		"entries_json": tftypes.NewValue(tftypes.String, ej),
+		"entry": tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{
+			newEntryValue("path", "/api/", ""),
+		}),
+	})
+
+	ruleVal := tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "AND"),
+		"entries_json": tftypes.NewValue(tftypes.String, nil),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{groupWithBoth}),
+	})
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      ruleVal,
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+
+	assert.True(t, resp.Diagnostics.HasError(), "expected mutual-exclusion error for group entries_json + entry blocks")
+}
+
+func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONOnly(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	ej := `[["path","/api/",""]]`
+
+	groupWithJSON := tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "OR"),
+		"entries_json": tftypes.NewValue(tftypes.String, ej),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+	})
+
+	ruleVal := tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "AND"),
+		"entries_json": tftypes.NewValue(tftypes.String, nil),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{groupWithJSON}),
+	})
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      ruleVal,
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+
+	assert.False(t, resp.Diagnostics.HasError(), "group with only entries_json should be valid: %v", resp.Diagnostics)
 }
