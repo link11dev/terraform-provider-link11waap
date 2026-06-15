@@ -333,6 +333,198 @@ func TestLoadBalancerCertificateResource_CRUD_WithFailingClient(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, vals) })
 }
 
+// --- Action with client ---
+
+func TestActionResource_CRUD_WithFailingClient(t *testing.T) {
+	r := &ActionResource{}
+	createVals := map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, nil),
+		"name":        tftypes.NewValue(tftypes.String, "test-action"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"type":        tftypes.NewValue(tftypes.String, "block"),
+	}
+	stateVals := map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, "action1"),
+		"name":        tftypes.NewValue(tftypes.String, "test-action"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"type":        tftypes.NewValue(tftypes.String, "block"),
+	}
+
+	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, createVals) })
+	t.Run("Read", func(t *testing.T) { crudReadWithClient(t, r, stateVals) })
+	t.Run("Update", func(t *testing.T) { crudUpdateWithClient(t, r, stateVals) })
+	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, stateVals) })
+}
+
+// --- Content Filter Profile with client ---
+
+// cfEntryTypeATfType returns the tftypes.Object type for a parameter-style (Type A) entry.
+func cfEntryTypeATfType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":                  tftypes.String,
+		"parameter":           tftypes.String,
+		"value":               tftypes.String,
+		"restrict":            tftypes.Bool,
+		"mask":                tftypes.Bool,
+		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
+		"case_insensitive":    tftypes.Bool,
+		"active":              tftypes.Bool,
+	}}
+}
+
+// cfEntryTypeBTfType returns the tftypes.Object type for a url/path-style (Type B) entry.
+func cfEntryTypeBTfType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id":                  tftypes.String,
+		"restrict":            tftypes.Bool,
+		"mask":                tftypes.Bool,
+		"ignore_cf_rule_tags": tftypes.List{ElementType: tftypes.String},
+		"domain":              tftypes.String,
+		"path":                tftypes.String,
+		"case_insensitive":    tftypes.Bool,
+		"active":              tftypes.Bool,
+	}}
+}
+
+// cfSectionTfType returns the tftypes.Object type for a profile section (Type A entries).
+func cfSectionTfType() tftypes.Object {
+	entryList := tftypes.List{ElementType: cfEntryTypeATfType()}
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"max_count":         tftypes.Number,
+		"max_length":        tftypes.Number,
+		"enable_max_count":  tftypes.Bool,
+		"enable_max_length": tftypes.Bool,
+		"names":             entryList,
+		"regex":             entryList,
+	}}
+}
+
+// cfSectionTfValue returns a zero-value tftypes.Value for a profile section.
+func cfSectionTfValue() tftypes.Value {
+	st := cfSectionTfType()
+	entryList := st.AttributeTypes["names"]
+	return tftypes.NewValue(st, map[string]tftypes.Value{
+		"max_count":         tftypes.NewValue(tftypes.Number, 0),
+		"max_length":        tftypes.NewValue(tftypes.Number, 0),
+		"enable_max_count":  tftypes.NewValue(tftypes.Bool, false),
+		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
+		"names":             tftypes.NewValue(entryList, nil),
+		"regex":             tftypes.NewValue(entryList, nil),
+	})
+}
+
+// cfPathSectionTfType returns the tftypes.Object type for the path section (Type B entries).
+func cfPathSectionTfType() tftypes.Object {
+	entryList := tftypes.List{ElementType: cfEntryTypeBTfType()}
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"max_count":         tftypes.Number,
+		"max_length":        tftypes.Number,
+		"enable_max_count":  tftypes.Bool,
+		"enable_max_length": tftypes.Bool,
+		"names":             entryList,
+		"regex":             entryList,
+		"text":              entryList,
+	}}
+}
+
+// cfPathSectionTfValue returns a zero-value tftypes.Value for the path section.
+func cfPathSectionTfValue() tftypes.Value {
+	st := cfPathSectionTfType()
+	entryList := st.AttributeTypes["names"]
+	return tftypes.NewValue(st, map[string]tftypes.Value{
+		"max_count":         tftypes.NewValue(tftypes.Number, 0),
+		"max_length":        tftypes.NewValue(tftypes.Number, 0),
+		"enable_max_count":  tftypes.NewValue(tftypes.Bool, false),
+		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
+		"names":             tftypes.NewValue(entryList, nil),
+		"regex":             tftypes.NewValue(entryList, nil),
+		"text":              tftypes.NewValue(entryList, nil),
+	})
+}
+
+// cfURLSectionTfType returns the tftypes.Object type for the url section (no names, Type B entries).
+func cfURLSectionTfType() tftypes.Object {
+	entryList := tftypes.List{ElementType: cfEntryTypeBTfType()}
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"max_count":         tftypes.Number,
+		"max_length":        tftypes.Number,
+		"enable_max_count":  tftypes.Bool,
+		"enable_max_length": tftypes.Bool,
+		"regex":             entryList,
+		"text":              entryList,
+	}}
+}
+
+// cfURLSectionTfValue returns a zero-value tftypes.Value for the url section.
+func cfURLSectionTfValue() tftypes.Value {
+	st := cfURLSectionTfType()
+	entryList := st.AttributeTypes["regex"]
+	return tftypes.NewValue(st, map[string]tftypes.Value{
+		"max_count":         tftypes.NewValue(tftypes.Number, 0),
+		"max_length":        tftypes.NewValue(tftypes.Number, 0),
+		"enable_max_count":  tftypes.NewValue(tftypes.Bool, false),
+		"enable_max_length": tftypes.NewValue(tftypes.Bool, false),
+		"regex":             tftypes.NewValue(entryList, nil),
+		"text":              tftypes.NewValue(entryList, nil),
+	})
+}
+
+func cfDecodingTfValue() tftypes.Value {
+	dt := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"base64":  tftypes.Bool,
+		"dual":    tftypes.Bool,
+		"html":    tftypes.Bool,
+		"unicode": tftypes.Bool,
+	}}
+	return tftypes.NewValue(dt, map[string]tftypes.Value{
+		"base64":  tftypes.NewValue(tftypes.Bool, true),
+		"dual":    tftypes.NewValue(tftypes.Bool, false),
+		"html":    tftypes.NewValue(tftypes.Bool, false),
+		"unicode": tftypes.NewValue(tftypes.Bool, false),
+	})
+}
+
+func TestContentFilterProfileResource_CRUD_WithFailingClient(t *testing.T) {
+	r := &ContentFilterProfileResource{}
+
+	base := map[string]tftypes.Value{
+		"config_id":       tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":            tftypes.NewValue(tftypes.String, "test-profile"),
+		"description":     tftypes.NewValue(tftypes.String, ""),
+		"ignore_alphanum": tftypes.NewValue(tftypes.Bool, false),
+		"masking_seed":    tftypes.NewValue(tftypes.String, "seed"),
+		"graphql_path":    tftypes.NewValue(tftypes.String, ""),
+		"ignore_body":     tftypes.NewValue(tftypes.Bool, false),
+		"action":          tftypes.NewValue(tftypes.String, ""),
+		"args":            cfSectionTfValue(),
+		"headers":         cfSectionTfValue(),
+		"cookies":         cfSectionTfValue(),
+		"path":            cfPathSectionTfValue(),
+		"url":             cfURLSectionTfValue(),
+		"allsections":     cfSectionTfValue(),
+		"decoding":        cfDecodingTfValue(),
+	}
+
+	createVals := make(map[string]tftypes.Value)
+	for k, v := range base {
+		createVals[k] = v
+	}
+	createVals["id"] = tftypes.NewValue(tftypes.String, nil)
+
+	stateVals := make(map[string]tftypes.Value)
+	for k, v := range base {
+		stateVals[k] = v
+	}
+	stateVals["id"] = tftypes.NewValue(tftypes.String, "cfp1")
+
+	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, createVals) })
+	t.Run("Read", func(t *testing.T) { crudReadWithClient(t, r, stateVals) })
+	t.Run("Update", func(t *testing.T) { crudUpdateWithClient(t, r, stateVals) })
+	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, stateVals) })
+}
+
 // --- Load Balancer Regions with client ---
 
 func TestLoadBalancerRegionsResource_CRUD_WithFailingClient(t *testing.T) {

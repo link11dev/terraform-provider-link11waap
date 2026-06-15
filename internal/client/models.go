@@ -387,6 +387,91 @@ type ContentFilterRule struct {
 	Tags        []string `json:"tags,omitempty"`
 }
 
+// Action represents an action in the API.
+type Action struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Type        string        `json:"type"`
+	Tags        []string      `json:"tags,omitempty"`
+	Params      *ActionParams `json:"params,omitempty"`
+}
+
+// ActionParams represents the params block of an action.
+type ActionParams struct {
+	Content string            `json:"content,omitempty"`
+	Status  *int              `json:"status,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// ContentFilterProfile represents a content filter profile in the API.
+type ContentFilterProfile struct {
+	ID             string                      `json:"id"`
+	Name           string                      `json:"name"`
+	Description    string                      `json:"description,omitempty"`
+	IgnoreAlphanum bool                        `json:"ignore_alphanum"`
+	MaskingSeed    string                      `json:"masking_seed"`
+	ContentType    []string                    `json:"content_type,omitempty"`
+	GraphqlPath    string                      `json:"graphql_path,omitempty"`
+	IgnoreBody     bool                        `json:"ignore_body"`
+	Active         []string                    `json:"active,omitempty"`
+	Report         []string                    `json:"report,omitempty"`
+	Ignore         []string                    `json:"ignore,omitempty"`
+	Tags           []string                    `json:"tags,omitempty"`
+	Action         string                      `json:"action,omitempty"`
+	Args           ContentFilterProfileSection `json:"args"`
+	Headers        ContentFilterProfileSection `json:"headers"`
+	Cookies        ContentFilterProfileSection `json:"cookies"`
+	Path           ContentFilterProfileSection `json:"path"`
+	URL            ContentFilterURLSection     `json:"url"`
+	AllSections    ContentFilterProfileSection `json:"allsections"`
+	Decoding       ContentFilterDecoding       `json:"decoding"`
+}
+
+// ContentFilterProfileSection represents one section (args/headers/cookies/path/allsections).
+type ContentFilterProfileSection struct {
+	MaxCount        int                       `json:"max_count"`
+	MaxLength       int                       `json:"max_length"`
+	EnableMaxCount  bool                      `json:"enable_max_count"`
+	EnableMaxLength bool                      `json:"enable_max_length"`
+	Names           []ContentFilterEntryMatch `json:"names"`
+	Regex           []ContentFilterEntryMatch `json:"regex"`
+	Text            []ContentFilterEntryMatch `json:"text,omitempty"`
+}
+
+// ContentFilterURLSection represents the url section, which does not support names.
+type ContentFilterURLSection struct {
+	MaxCount        int                       `json:"max_count"`
+	MaxLength       int                       `json:"max_length"`
+	EnableMaxCount  bool                      `json:"enable_max_count"`
+	EnableMaxLength bool                      `json:"enable_max_length"`
+	Regex           []ContentFilterEntryMatch `json:"regex"`
+	Text            []ContentFilterEntryMatch `json:"text"`
+}
+
+// ContentFilterEntryMatch represents a single matcher entry inside a section.
+type ContentFilterEntryMatch struct {
+	ID               string   `json:"id,omitempty"`
+	Type             string   `json:"type,omitempty"`
+	Key              string   `json:"key,omitempty"`
+	Reg              string   `json:"reg,omitempty"`
+	Restrict         bool     `json:"restrict"`
+	Mask             bool     `json:"mask"`
+	IgnoreCFRuleTags []string `json:"ignore_cf_rule_tags,omitempty"`
+	Domain           string   `json:"domain,omitempty"`
+	Path             string   `json:"path,omitempty"`
+	CaseInsensitive  bool     `json:"case_insensitive"`
+	Active           bool     `json:"active"`
+}
+
+// ContentFilterDecoding represents the decoding flags of a profile.
+type ContentFilterDecoding struct {
+	Base64  bool `json:"base64"`
+	Dual    bool `json:"dual"`
+	HTML    bool `json:"html"`
+	Unicode bool `json:"unicode"`
+}
+
 // GlobalFilter represents a global filter entry in the API
 type GlobalFilter struct {
 	ID          string      `json:"id"`
