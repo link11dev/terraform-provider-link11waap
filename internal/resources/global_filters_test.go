@@ -1025,3 +1025,121 @@ func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONOnly(t *testing.T) 
 
 	assert.False(t, resp.Diagnostics.HasError(), "group with only entries_json should be valid: %v", resp.Diagnostics)
 }
+
+func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	testCases := []struct {
+		name        string
+		entriesJSON string
+		expectErr   bool
+	}{
+		{
+			name:        "valid array",
+			entriesJSON: `[["path","/api/",""]]`,
+			expectErr:   false,
+		},
+		{
+			name:        "empty array",
+			entriesJSON: `[]`,
+			expectErr:   false,
+		},
+		{
+			name:        "object instead of array",
+			entriesJSON: `{"key":"value"}`,
+			expectErr:   true,
+		},
+		{
+			name:        "invalid json",
+			entriesJSON: `not json`,
+			expectErr:   true,
+		},
+		{
+			name:        "plain string",
+			entriesJSON: `"just a string"`,
+			expectErr:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+				"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+				"name":      tftypes.NewValue(tftypes.String, "test"),
+				"rule":      newRuleValue("OR", &tc.entriesJSON, nil),
+			})
+
+			req := resource.ValidateConfigRequest{Config: config}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, req, resp)
+
+			if tc.expectErr {
+				assert.True(t, resp.Diagnostics.HasError(), "expected error for entries_json=%q", tc.entriesJSON)
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected error for entries_json=%q: %v", tc.entriesJSON, resp.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	buildRuleWithGroupJSON := func(ej string) tftypes.Value {
+		group := tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+			"relation":     tftypes.NewValue(tftypes.String, "OR"),
+			"entries_json": tftypes.NewValue(tftypes.String, ej),
+			"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+		})
+		return tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+			"relation":     tftypes.NewValue(tftypes.String, "AND"),
+			"entries_json": tftypes.NewValue(tftypes.String, nil),
+			"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+			"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{group}),
+		})
+	}
+
+	testCases := []struct {
+		name        string
+		entriesJSON string
+		expectErr   bool
+	}{
+		{
+			name:        "valid array",
+			entriesJSON: `[["path","/api/",""]]`,
+			expectErr:   false,
+		},
+		{
+			name:        "object instead of array",
+			entriesJSON: `{"key":"value"}`,
+			expectErr:   true,
+		},
+		{
+			name:        "invalid json",
+			entriesJSON: `not json`,
+			expectErr:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+				"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+				"name":      tftypes.NewValue(tftypes.String, "test"),
+				"rule":      buildRuleWithGroupJSON(tc.entriesJSON),
+			})
+
+			req := resource.ValidateConfigRequest{Config: config}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, req, resp)
+
+			if tc.expectErr {
+				assert.True(t, resp.Diagnostics.HasError(), "expected error for group entries_json=%q", tc.entriesJSON)
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected error for group entries_json=%q: %v", tc.entriesJSON, resp.Diagnostics)
+			}
+		})
+	}
+}

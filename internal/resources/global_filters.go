@@ -432,6 +432,20 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 		)
 	}
 
+	// Basic format validation for entries_json: must be a JSON array if set.
+	// We don't enforce the full schema here since it's complex and validated
+	// by the API, but we can catch basic mistakes like invalid JSON or not an array.
+	if jsonSet {
+		var arr []interface{}
+		if err := json.Unmarshal([]byte(rule.EntriesJSON.ValueString()), &arr); err != nil {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("rule").AtName("entries_json"),
+				"Invalid entries_json",
+				"entries_json must be a JSON array, got: "+err.Error(),
+			)
+		}
+	}
+
 	for i, g := range rule.Groups {
 		gJSONSet := !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown() && g.EntriesJSON.ValueString() != ""
 		if gJSONSet && len(g.Entries) > 0 {
@@ -440,6 +454,19 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 				"Conflicting group entry definitions",
 				"'entries_json' is mutually exclusive with 'entry' blocks within the same group.",
 			)
+		}
+		// Basic format validation for nested entries_json: must be a JSON array if set.
+		// We don't enforce the full schema here since it's complex and validated
+		// by the API, but we can catch basic mistakes like invalid JSON or not an array.
+		if gJSONSet {
+			var arr []interface{}
+			if err := json.Unmarshal([]byte(g.EntriesJSON.ValueString()), &arr); err != nil {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("rule").AtName("group").AtListIndex(i).AtName("entries_json"),
+					"Invalid entries_json",
+					"entries_json must be a JSON array, got: "+err.Error(),
+				)
+			}
 		}
 	}
 }
