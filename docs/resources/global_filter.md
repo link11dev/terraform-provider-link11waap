@@ -139,7 +139,6 @@ resource "link11waap_global_filter" "large_ip_blocklist" {
 
 
 # Example 5: Using entries_json for groups
-
 resource "link11waap_global_filter" "nested_json_groups" {
   config_id   = data.link11waap_config.main.id
   name        = "JSON encoded entries example"
