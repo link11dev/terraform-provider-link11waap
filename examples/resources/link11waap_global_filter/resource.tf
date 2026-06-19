@@ -97,7 +97,7 @@ resource "link11waap_global_filter" "complex_filter" {
   }
 }
 
-# Example 4: Using entries_json for complex rules
+# Example 4: Using entries_json for large blocklists (e.g., IP blocklist, ASN blocklist)
 resource "link11waap_global_filter" "large_ip_blocklist" {
   config_id = data.link11waap_config.main.id
   name      = "Large IP Blocklist"
