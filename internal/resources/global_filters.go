@@ -421,8 +421,24 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 	}
 
 	rule := config.Rule
-	jsonSet := !rule.EntriesJSON.IsNull() && !rule.EntriesJSON.IsUnknown() && rule.EntriesJSON.ValueString() != ""
+	ruleJSONDefined := !rule.EntriesJSON.IsNull() && !rule.EntriesJSON.IsUnknown()
+	ruleJSONRaw := ""
+	if ruleJSONDefined {
+		ruleJSONRaw = rule.EntriesJSON.ValueString()
+	}
+	// Check if it's empty or just whitespace using strings.TrimSpace ONLY for the validation check
+	ruleJSONIsEmpty := ruleJSONDefined && strings.TrimSpace(ruleJSONRaw) == ""
+	jsonSet := ruleJSONDefined && ruleJSONRaw != ""
 	blocksSet := len(rule.Entries) > 0 || len(rule.Groups) > 0
+
+	// Validation check for empty/whitespace-only strings
+	if ruleJSONIsEmpty {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("rule").AtName("entries_json"),
+			"Invalid entries_json",
+			"entries_json must not be an empty or whitespace-only string. Omit the attribute to use nested blocks, or provide a JSON array.",
+		)
+	}
 
 	if jsonSet && blocksSet {
 		resp.Diagnostics.AddAttributeError(
@@ -437,7 +453,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 	// by the API, but we can catch basic mistakes like invalid JSON or not an array.
 	if jsonSet {
 		var arr []interface{}
-		if err := json.Unmarshal([]byte(rule.EntriesJSON.ValueString()), &arr); err != nil {
+		if err := json.Unmarshal([]byte(ruleJSONRaw), &arr); err != nil {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("rule").AtName("entries_json"),
 				"Invalid entries_json",
@@ -447,7 +463,22 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 	}
 
 	for i, g := range rule.Groups {
-		gJSONSet := !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown() && g.EntriesJSON.ValueString() != ""
+		groupJSONDefined := !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown()
+		groupJSONRaw := ""
+		if groupJSONDefined {
+			groupJSONRaw = g.EntriesJSON.ValueString()
+		}
+		groupJSONIsEmpty := groupJSONDefined && strings.TrimSpace(groupJSONRaw) == ""
+		gJSONSet := groupJSONDefined && !groupJSONIsEmpty
+
+		if groupJSONIsEmpty {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("rule").AtName("group").AtListIndex(i).AtName("entries_json"),
+				"Invalid entries_json",
+				"entries_json must not be an empty or whitespace-only string. Omit the attribute to use nested blocks, or provide a JSON array.",
+			)
+		}
+
 		if gJSONSet && len(g.Entries) > 0 {
 			resp.Diagnostics.AddAttributeError(
 				path.Root("rule").AtName("group").AtListIndex(i).AtName("entries_json"),
@@ -460,7 +491,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 		// by the API, but we can catch basic mistakes like invalid JSON or not an array.
 		if gJSONSet {
 			var arr []interface{}
-			if err := json.Unmarshal([]byte(g.EntriesJSON.ValueString()), &arr); err != nil {
+			if err := json.Unmarshal([]byte(groupJSONRaw), &arr); err != nil {
 				resp.Diagnostics.AddAttributeError(
 					path.Root("rule").AtName("group").AtListIndex(i).AtName("entries_json"),
 					"Invalid entries_json",

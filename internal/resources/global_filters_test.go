@@ -1046,6 +1046,16 @@ func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.
 			expectErr:   false,
 		},
 		{
+			name:        "empty string",
+			entriesJSON: "",
+			expectErr:   true,
+		},
+		{
+			name:        "whitespace string",
+			entriesJSON: "   \n\t  ",
+			expectErr:   true,
+		},
+		{
 			name:        "object instead of array",
 			entriesJSON: `{"key":"value"}`,
 			expectErr:   true,
@@ -1110,6 +1120,16 @@ func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing
 			name:        "valid array",
 			entriesJSON: `[["path","/api/",""]]`,
 			expectErr:   false,
+		},
+		{
+			name:        "empty string",
+			entriesJSON: "",
+			expectErr:   true,
+		},
+		{
+			name:        "whitespace string",
+			entriesJSON: "   ",
+			expectErr:   true,
 		},
 		{
 			name:        "object instead of array",
