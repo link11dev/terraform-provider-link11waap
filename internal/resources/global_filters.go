@@ -528,6 +528,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 			"Invalid entries_json",
 			"entries_json must not be an empty or whitespace-only string. Omit the attribute to use nested blocks, or provide a JSON array.",
 		)
+		return
 	}
 
 	if jsonSet && blocksSet {
@@ -536,6 +537,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 			"Conflicting rule entry definitions",
 			"'entries_json' is mutually exclusive with 'entry' and 'group' blocks within a rule. Use either entries_json (for large filters) or entry/group blocks, not both.",
 		)
+		return
 	}
 
 	for i, g := range rule.Groups {
@@ -553,6 +555,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 				"Invalid entries_json",
 				"entries_json must not be an empty or whitespace-only string. Omit the attribute to use nested blocks, or provide a JSON array.",
 			)
+			return
 		}
 
 		if gJSONSet && len(g.Entries) > 0 {
@@ -561,6 +564,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 				"Conflicting group entry definitions",
 				"'entries_json' is mutually exclusive with 'entry' blocks within the same group.",
 			)
+			return
 		}
 	}
 }
@@ -602,8 +606,8 @@ func ruleModelToAPI(rule *RuleModel) (interface{}, diag.Diagnostics) {
 	}
 
 	if !rule.EntriesJSON.IsNull() && !rule.EntriesJSON.IsUnknown() && rule.EntriesJSON.ValueString() != "" {
-		var entries []interface{}
-		if err := json.Unmarshal([]byte(rule.EntriesJSON.ValueString()), &entries); err != nil {
+		entries, err := unmarshalEntriesJSON(rule.EntriesJSON.ValueString())
+		if err != nil {
 			diags.AddAttributeError(
 				path.Root("rule").AtName("entries_json"),
 				"Invalid entries_json",
@@ -634,6 +638,11 @@ func ruleModelToAPI(rule *RuleModel) (interface{}, diag.Diagnostics) {
 	}, diags
 }
 
+func unmarshalEntriesJSON(raw string) ([]interface{}, error) {
+	var entries []interface{}
+	return entries, json.Unmarshal([]byte(raw), &entries)
+}
+
 func entryModelToAPI(e EntryModel) interface{} {
 	comment := ""
 	if !e.Comment.IsNull() && !e.Comment.IsUnknown() {
@@ -652,8 +661,8 @@ func entryModelToAPI(e EntryModel) interface{} {
 func groupModelToAPI(g GroupModel) (interface{}, diag.Diagnostics) {
 	var diags diag.Diagnostics
 	if !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown() && g.EntriesJSON.ValueString() != "" {
-		var entries []interface{}
-		if err := json.Unmarshal([]byte(g.EntriesJSON.ValueString()), &entries); err != nil {
+		entries, err := unmarshalEntriesJSON(g.EntriesJSON.ValueString())
+		if err != nil {
 			diags.AddError("Invalid group entries_json", "Could not parse group entries_json as a JSON array: "+err.Error())
 			return nil, diags
 		}

@@ -1243,6 +1243,49 @@ func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.
 	}
 }
 
+func TestUnmarshalEntriesJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLen   int
+		wantError bool
+	}{
+		{
+			name:    "valid array of tuples",
+			input:   `[["path","/api/","comment"],["ip","1.2.3.4",""]]`,
+			wantLen: 2,
+		},
+		{
+			name:    "empty array",
+			input:   `[]`,
+			wantLen: 0,
+		},
+		{
+			name:      "invalid JSON",
+			input:     `not valid json`,
+			wantError: true,
+		},
+		{
+			name:      "JSON object instead of array",
+			input:     `{"key":"value"}`,
+			wantError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := unmarshalEntriesJSON(tc.input)
+			if tc.wantError {
+				assert.Error(t, err)
+				assert.Nil(t, entries)
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, entries, tc.wantLen)
+			}
+		})
+	}
+}
+
 func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing.T) {
 	r := &GlobalFilterResource{}
 	ctx := context.Background()
