@@ -96,6 +96,24 @@ func TestGlobalFilterResource_ValidateConfig_MutualExclusion(t *testing.T) {
 			expectErr: true,
 		},
 		{
+			name: "entries_json set, zero entry blocks, one group block",
+			rule: tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+				"relation":     tftypes.NewValue(tftypes.String, "OR"),
+				"entries_json": tftypes.NewValue(tftypes.String, ej),
+				"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+				"group": tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{
+					tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+						"relation":     tftypes.NewValue(tftypes.String, "AND"),
+						"entries_json": tftypes.NewValue(tftypes.String, nil),
+						"entry": tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{
+							newEntryValue("path", "/api/", ""),
+						}),
+					}),
+				}),
+			}),
+			expectErr: true,
+		},
+		{
 			name:      "neither set",
 			rule:      newRuleValue("OR", nil, nil),
 			expectErr: false,
