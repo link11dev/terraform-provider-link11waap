@@ -275,7 +275,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 											"asn", "authority", "company", "cookies", "country", "headers",
 											"ip", "method", "network", "organization", "path", "query",
 											"region", "secpolentryid", "secpolid", "secpolentryname",
-											"securitypolicyname", "securitypolicy", "securitypolicyentry",
+											"secpolname", "securitypolicy", "securitypolicyentry",
 											"securitypolicyentryid", "securitypolicyentryname",
 											"securitypolicyid", "securitypolicyname", "session",
 											"subregion", "tag", "uri",
