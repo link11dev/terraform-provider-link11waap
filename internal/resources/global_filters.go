@@ -258,7 +258,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 					"entries_json": schema.StringAttribute{
 						CustomType:  jsontypes.NormalizedType{},
 						Optional:    true,
-						Description: "The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is an array of leaf entries: [[type, value, comment], ...]. Mutually exclusive with 'entry' blocks and 'group' blocks. Typically supplied with file(\"...\").",
+						Description: "The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is an array of leaf entries: [[type, value, comment], ...]. Mutually exclusive with 'entry' blocks. Typically supplied with file(\"...\").",
 						Validators:  []validator.String{entriesJSONLeafValidator{}},
 					},
 				},

@@ -198,7 +198,7 @@ Required:
 
 Optional:
 
-- `entries_json` (String) The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is an array of leaf entries: [type, value, comment]. Mutually exclusive with 'entry' and 'group' blocks within the same rule. Typically supplied with file("...").
+- `entries_json` (String) The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is an array of leaf entries: [[type, value, comment], ...]. Mutually exclusive with 'entry' blocks. Typically supplied with file("...").
 - `entry` (Block List) A leaf condition entry. Use 'name' for types that match against a named field (headers, cookies, args). (see [below for nested schema](#nestedblock--rule--entry))
 - `group` (Block List) A nested rule group, combining entries with its own relation. (see [below for nested schema](#nestedblock--rule--group))
 
@@ -225,7 +225,7 @@ Required:
 
 Optional:
 
-- `entries_json` (String) The group's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Mutually exclusive with 'entry' blocks within the same group.
+- `entries_json` (String) The group's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. The JSON is an array of leaf entries: [[type, value, comment], ...]. Mutually exclusive with 'entry' blocks within the same group.
 - `entry` (Block List) A leaf condition entry within this group. (see [below for nested schema](#nestedblock--rule--group--entry))
 
 <a id="nestedblock--rule--group--entry"></a>
