@@ -1286,6 +1286,60 @@ func TestUnmarshalEntriesJSON(t *testing.T) {
 	}
 }
 
+func TestEvalEntriesJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		v         jsontypes.Normalized
+		wantEmpty bool
+		wantSet   bool
+	}{
+		{
+			name:      "null — not empty, not set",
+			v:         jsontypes.NewNormalizedNull(),
+			wantEmpty: false,
+			wantSet:   false,
+		},
+		{
+			name:      "unknown — not empty, not set",
+			v:         jsontypes.NewNormalizedUnknown(),
+			wantEmpty: false,
+			wantSet:   false,
+		},
+		{
+			name:      "non-empty value — not empty, is set",
+			v:         jsontypes.NewNormalizedValue(`[["path","/api/",""]]`),
+			wantEmpty: false,
+			wantSet:   true,
+		},
+		{
+			name:      "empty string — is empty, not set",
+			v:         jsontypes.NewNormalizedValue(""),
+			wantEmpty: true,
+			wantSet:   false,
+		},
+		{
+			name:      "whitespace-only string — is empty, not set",
+			v:         jsontypes.NewNormalizedValue("   \n\t  "),
+			wantEmpty: true,
+			wantSet:   false,
+		},
+		{
+			name:      "valid JSON array — not empty, is set",
+			v:         jsontypes.NewNormalizedValue(`[]`),
+			wantEmpty: false,
+			wantSet:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			isEmpty, isSet := evalEntriesJSON(tc.v)
+			assert.Equal(t, tc.wantEmpty, isEmpty, "isEmpty")
+			assert.Equal(t, tc.wantSet, isSet, "isSet")
+		})
+	}
+}
+
 func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing.T) {
 	r := &GlobalFilterResource{}
 	ctx := context.Background()

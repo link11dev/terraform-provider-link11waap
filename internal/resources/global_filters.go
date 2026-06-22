@@ -502,6 +502,19 @@ func (r *GlobalFilterResource) ImportState(ctx context.Context, req resource.Imp
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
 }
 
+// evalEntriesJSON reports whether a jsontypes.Normalized entries_json value is empty
+// (defined but blank/whitespace-only) and whether it is set (defined and non-empty).
+func evalEntriesJSON(v jsontypes.Normalized) (isEmpty, isSet bool) {
+	defined := !v.IsNull() && !v.IsUnknown()
+	raw := ""
+	if defined {
+		raw = v.ValueString()
+	}
+	isEmpty = defined && strings.TrimSpace(raw) == ""
+	isSet = defined && !isEmpty
+	return
+}
+
 // ValidateConfig enforces that entries_json is mutually exclusive with entry/group blocks within a rule.
 func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config GlobalFilterResourceModel
@@ -511,17 +524,9 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 	}
 
 	rule := config.Rule
-	ruleJSONDefined := !rule.EntriesJSON.IsNull() && !rule.EntriesJSON.IsUnknown()
-	ruleJSONRaw := ""
-	if ruleJSONDefined {
-		ruleJSONRaw = rule.EntriesJSON.ValueString()
-	}
-	// Check if it's empty or just whitespace using strings.TrimSpace ONLY for the validation check
-	ruleJSONIsEmpty := ruleJSONDefined && strings.TrimSpace(ruleJSONRaw) == ""
-	jsonSet := ruleJSONDefined && ruleJSONRaw != ""
+	ruleJSONIsEmpty, jsonSet := evalEntriesJSON(rule.EntriesJSON)
 	blocksSet := len(rule.Entries) > 0 || len(rule.Groups) > 0
 
-	// Validation check for empty/whitespace-only strings
 	if ruleJSONIsEmpty {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("rule").AtName("entries_json"),
@@ -541,13 +546,7 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 	}
 
 	for i, g := range rule.Groups {
-		groupJSONDefined := !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown()
-		groupJSONRaw := ""
-		if groupJSONDefined {
-			groupJSONRaw = g.EntriesJSON.ValueString()
-		}
-		groupJSONIsEmpty := groupJSONDefined && strings.TrimSpace(groupJSONRaw) == ""
-		gJSONSet := groupJSONDefined && !groupJSONIsEmpty
+		groupJSONIsEmpty, gJSONSet := evalEntriesJSON(g.EntriesJSON)
 
 		if groupJSONIsEmpty {
 			resp.Diagnostics.AddAttributeError(
