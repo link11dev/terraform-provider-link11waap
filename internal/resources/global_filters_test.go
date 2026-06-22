@@ -2,11 +2,15 @@ package resources
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/stretchr/testify/assert"
@@ -602,7 +606,7 @@ func TestRuleRoundTrip(t *testing.T) {
 func TestRuleModelToAPI_EntriesJSON(t *testing.T) {
 	rule := &RuleModel{
 		Relation:    types.StringValue("OR"),
-		EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/api/","API path"],{"relation":"AND","entries":[["asn","100",""]]}]`),
+		EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/api/","API path"],["ip","203.0.113.0/24","Suspicious subnet"]]`),
 	}
 
 	apiData, diags := ruleModelToAPI(rule)
@@ -617,17 +621,17 @@ func TestRuleModelToAPI_EntriesJSON(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, entries, 2)
 
-	// First is a leaf entry
-	entry, ok := entries[0].([]interface{})
+	first, ok := entries[0].([]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "path", entry[0])
-	assert.Equal(t, "/api/", entry[1])
-	assert.Equal(t, "API path", entry[2])
+	assert.Equal(t, "path", first[0])
+	assert.Equal(t, "/api/", first[1])
+	assert.Equal(t, "API path", first[2])
 
-	// Second is a group object
-	group, ok := entries[1].(map[string]interface{})
+	second, ok := entries[1].([]interface{})
 	require.True(t, ok)
-	assert.Equal(t, "AND", group["relation"])
+	assert.Equal(t, "ip", second[0])
+	assert.Equal(t, "203.0.113.0/24", second[1])
+	assert.Equal(t, "Suspicious subnet", second[2])
 }
 
 func TestRuleModelToAPI_EntriesJSON_EmptyArray(t *testing.T) {
@@ -654,6 +658,136 @@ func TestRuleModelToAPI_EntriesJSON_Invalid(t *testing.T) {
 	apiData, diags := ruleModelToAPI(rule)
 	assert.True(t, diags.HasError(), "invalid entries_json should produce a diagnostic")
 	assert.Nil(t, apiData)
+}
+
+func diagMessages(resp *validator.StringResponse) string {
+	var parts []string
+	for _, d := range resp.Diagnostics {
+		parts = append(parts, d.Summary()+": "+d.Detail())
+	}
+	return strings.Join(parts, "\n")
+}
+
+func TestEntriesJSONLeafValidator(t *testing.T) {
+	v := entriesJSONLeafValidator{}
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		input       string
+		null        bool
+		wantError   bool
+		errContains string
+	}{
+		{
+			name:  "valid flat entries",
+			input: `[["path","/api/","API path"],["ip","203.0.113.0/24",""]]`,
+		},
+		{
+			name:  "empty array",
+			input: `[]`,
+		},
+		{
+			name: "null value is skipped",
+			null: true,
+		},
+		{
+			name:        "not a JSON array — object",
+			input:       `{"key":"value"}`,
+			wantError:   true,
+			errContains: "must be a JSON array",
+		},
+		{
+			name:        "contains a group object",
+			input:       `[["path","/api/","ok"],{"relation":"AND","entries":[]}]`,
+			wantError:   true,
+			errContains: "entry[1]: must be a JSON array",
+		},
+		{
+			name:        "tuple has wrong length — too short",
+			input:       `[["path","/api/"]]`,
+			wantError:   true,
+			errContains: "must have exactly 3 elements",
+		},
+		{
+			name:        "tuple has wrong length — too long",
+			input:       `[["path","/api/","comment","extra"]]`,
+			wantError:   true,
+			errContains: "must have exactly 3 elements",
+		},
+		{
+			name:        "value field is not a string",
+			input:       `[["path",123,""]]`,
+			wantError:   true,
+			errContains: "must be a string",
+		},
+		{
+			name:        "type field is a nested array",
+			input:       `[[["nested"],"value",""]]`,
+			wantError:   true,
+			errContains: "must be a string",
+		},
+		{
+			name:        "unknown type",
+			input:       `[["not-a-type","value",""]]`,
+			wantError:   true,
+			errContains: "unknown type",
+		},
+		{
+			name:  "all known types accepted",
+			input: `[["asn","100",""],["ip","1.2.3.4",""],["path","/",""],["country","DE",""],["method","GET",""],["headers","",""],["cookies","",""],["uri","/x",""],["query","q",""],["region","EU",""],["subregion","x",""],["tags","t",""],["session","s",""],["network","net",""],["authority","a",""],["company","c",""],["organization","o",""],["securitypolicy","sp",""],["securitypolicyentry","spe",""],["securitypolicyentryid","spei",""],["securitypolicyentryname","spen",""],["securitypolicyid","spi",""],["securitypolicyname","spn",""],["secpolentryid","sei",""],["secpolid","si",""],["secpolentryname","sen",""],["secpolname","sn",""]]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var configValue types.String
+			if tc.null {
+				configValue = types.StringNull()
+			} else {
+				configValue = types.StringValue(tc.input)
+			}
+			req := validator.StringRequest{
+				Path:        path.Root("entries_json"),
+				ConfigValue: configValue,
+			}
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, req, resp)
+
+			if tc.wantError {
+				require.True(t, resp.Diagnostics.HasError(), "expected validation error for input: %s", tc.input)
+				if tc.errContains != "" {
+					assert.Contains(t, diagMessages(resp), tc.errContains)
+				}
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected error: %s", diagMessages(resp))
+			}
+		})
+	}
+}
+
+func TestEntriesJSONLeafValidator_StopsAfterMaxErrors(t *testing.T) {
+	v := entriesJSONLeafValidator{}
+	ctx := context.Background()
+
+	// Build an array with 25 bad entries (objects instead of arrays).
+	parts := make([]string, 25)
+	for i := range parts {
+		parts[i] = fmt.Sprintf(`{"bad":%d}`, i)
+	}
+	input := "[" + strings.Join(parts, ",") + "]"
+
+	req := validator.StringRequest{
+		Path:        path.Root("entries_json"),
+		ConfigValue: types.StringValue(input),
+	}
+	resp := &validator.StringResponse{}
+	v.ValidateString(ctx, req, resp)
+
+	require.True(t, resp.Diagnostics.HasError())
+	// Should have exactly entriesJSONMaxErrors entry errors + 1 stop message.
+	assert.Equal(t, entriesJSONMaxErrors+1, len(resp.Diagnostics))
+	assert.Contains(t, diagMessages(resp), "validation stopped after")
 }
 
 func TestRuleModelToAPI_EntriesJSON_EmptyStringUsesBlocks(t *testing.T) {
@@ -1030,6 +1164,9 @@ func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.
 	r := &GlobalFilterResource{}
 	ctx := context.Background()
 
+	// ValidateConfig only checks empty/whitespace and mutual-exclusivity.
+	// JSON structure (array-of-3-string-tuples) is enforced by entriesJSONLeafValidator
+	// at schema level; see TestEntriesJSONLeafValidator for those cases.
 	testCases := []struct {
 		name        string
 		entriesJSON string
@@ -1046,6 +1183,16 @@ func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.
 			expectErr:   false,
 		},
 		{
+			name:        "object instead of array — caught by schema validator not ValidateConfig",
+			entriesJSON: `{"key":"value"}`,
+			expectErr:   false,
+		},
+		{
+			name:        "plain string — caught by schema validator not ValidateConfig",
+			entriesJSON: `"just a string"`,
+			expectErr:   false,
+		},
+		{
 			name:        "empty string",
 			entriesJSON: "",
 			expectErr:   true,
@@ -1053,21 +1200,6 @@ func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.
 		{
 			name:        "whitespace string",
 			entriesJSON: "   \n\t  ",
-			expectErr:   true,
-		},
-		{
-			name:        "object instead of array",
-			entriesJSON: `{"key":"value"}`,
-			expectErr:   true,
-		},
-		{
-			name:        "invalid json",
-			entriesJSON: `not json`,
-			expectErr:   true,
-		},
-		{
-			name:        "plain string",
-			entriesJSON: `"just a string"`,
 			expectErr:   true,
 		},
 	}
@@ -1116,9 +1248,16 @@ func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing
 		entriesJSON string
 		expectErr   bool
 	}{
+		// ValidateConfig only checks empty/whitespace and mutual-exclusivity.
+		// JSON structure is enforced by entriesJSONLeafValidator at schema level.
 		{
 			name:        "valid array",
 			entriesJSON: `[["path","/api/",""]]`,
+			expectErr:   false,
+		},
+		{
+			name:        "object instead of array — caught by schema validator not ValidateConfig",
+			entriesJSON: `{"key":"value"}`,
 			expectErr:   false,
 		},
 		{
@@ -1129,16 +1268,6 @@ func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing
 		{
 			name:        "whitespace string",
 			entriesJSON: "   ",
-			expectErr:   true,
-		},
-		{
-			name:        "object instead of array",
-			entriesJSON: `{"key":"value"}`,
-			expectErr:   true,
-		},
-		{
-			name:        "invalid json",
-			entriesJSON: `not json`,
 			expectErr:   true,
 		},
 	}

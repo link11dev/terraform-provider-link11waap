@@ -29,6 +29,94 @@ var (
 	_ resource.ResourceWithValidateConfig = &GlobalFilterResource{}
 )
 
+// validEntryTypes is the set of accepted type values for leaf entries in entries_json.
+var validEntryTypes = map[string]struct{}{
+	"asn": {}, "authority": {}, "company": {}, "cookies": {}, "country": {},
+	"headers": {}, "ip": {}, "method": {}, "network": {}, "organization": {},
+	"path": {}, "query": {}, "region": {}, "secpolentryid": {}, "secpolid": {},
+	"secpolentryname": {}, "secpolname": {}, "securitypolicy": {},
+	"securitypolicyentry": {}, "securitypolicyentryid": {},
+	"securitypolicyentryname": {}, "securitypolicyid": {},
+	"securitypolicyname": {}, "session": {}, "subregion": {}, "tags": {}, "uri": {},
+}
+
+const entriesJSONMaxErrors = 20
+
+// entriesJSONLeafValidator validates that entries_json is a JSON array of
+// [type, value, comment] string tuples (leaf entries only, no nested groups).
+// Uses []json.RawMessage to defer per-element parsing, keeping allocations low
+// even for 1000+ row payloads.
+type entriesJSONLeafValidator struct{}
+
+func (entriesJSONLeafValidator) Description(_ context.Context) string {
+	return `JSON array of leaf entry tuples: [["type","value","comment"], ...]`
+}
+
+func (entriesJSONLeafValidator) MarkdownDescription(_ context.Context) string {
+	return "JSON array of `[type, value, comment]` string tuples."
+}
+
+func (entriesJSONLeafValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	raw := req.ConfigValue.ValueString()
+	if raw == "" {
+		return
+	}
+
+	var rows []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &rows); err != nil {
+		resp.Diagnostics.AddAttributeError(req.Path, "Invalid entries_json",
+			"entries_json must be a JSON array: "+err.Error())
+		return
+	}
+
+	errCount := 0
+	for i, row := range rows {
+		if errCount >= entriesJSONMaxErrors {
+			resp.Diagnostics.AddAttributeError(req.Path, "Too many entries_json errors",
+				fmt.Sprintf("validation stopped after %d errors; fix the issues above and re-run", entriesJSONMaxErrors))
+			return
+		}
+
+		var tuple []json.RawMessage
+		if err := json.Unmarshal(row, &tuple); err != nil {
+			resp.Diagnostics.AddAttributeError(req.Path, "Invalid entries_json",
+				fmt.Sprintf("entry[%d]: must be a JSON array [type, value, comment], got: %s", i, string(row)))
+			errCount++
+			continue
+		}
+		if len(tuple) != 3 {
+			resp.Diagnostics.AddAttributeError(req.Path, "Invalid entries_json",
+				fmt.Sprintf("entry[%d]: must have exactly 3 elements [type, value, comment], got %d", i, len(tuple)))
+			errCount++
+			continue
+		}
+
+		names := [3]string{"type", "value", "comment"}
+		var fields [3]string
+		rowHasError := false
+		for j := range tuple {
+			if err := json.Unmarshal(tuple[j], &fields[j]); err != nil {
+				resp.Diagnostics.AddAttributeError(req.Path, "Invalid entries_json",
+					fmt.Sprintf("entry[%d].%s: must be a string, got: %s", i, names[j], string(tuple[j])))
+				errCount++
+				rowHasError = true
+			}
+		}
+		if rowHasError {
+			continue
+		}
+
+		if _, ok := validEntryTypes[fields[0]]; !ok {
+			resp.Diagnostics.AddAttributeError(req.Path, "Invalid entries_json",
+				fmt.Sprintf("entry[%d].type: unknown type %q; valid types: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri", i, fields[0]))
+			errCount++
+		}
+	}
+}
+
 // GlobalFilterResource implements the global filter resource.
 type GlobalFilterResource struct {
 	client *client.Client
@@ -170,7 +258,8 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 					"entries_json": schema.StringAttribute{
 						CustomType:  jsontypes.NormalizedType{},
 						Optional:    true,
-						Description: "The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is an array of leaf entries: [type, value, comment]. Mutually exclusive with 'entry' blocks and `entries_json` blocks within the same group. Typically supplied with file(\"...\").",
+						Description: "The rule's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Intended for very large filters (thousands of entries) where block syntax is unworkable. The JSON is an array of leaf entries: [[type, value, comment], ...]. Mutually exclusive with 'entry' blocks and 'group' blocks. Typically supplied with file(\"...\").",
+						Validators:  []validator.String{entriesJSONLeafValidator{}},
 					},
 				},
 				Blocks: map[string]schema.Block{
@@ -218,7 +307,8 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 								"entries_json": schema.StringAttribute{
 									CustomType:  jsontypes.NormalizedType{},
 									Optional:    true,
-									Description: "The group's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. Mutually exclusive with 'entry' blocks within the same group.",
+									Description: "The group's entire entries array as a raw JSON string, as an alternative to nested 'entry' blocks. The JSON is an array of leaf entries: [[type, value, comment], ...]. Mutually exclusive with 'entry' blocks within the same group.",
+									Validators:  []validator.String{entriesJSONLeafValidator{}},
 								},
 							},
 							Blocks: map[string]schema.Block{
@@ -448,20 +538,6 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 		)
 	}
 
-	// Basic format validation for entries_json: must be a JSON array if set.
-	// We don't enforce the full schema here since it's complex and validated
-	// by the API, but we can catch basic mistakes like invalid JSON or not an array.
-	if jsonSet {
-		var arr []interface{}
-		if err := json.Unmarshal([]byte(ruleJSONRaw), &arr); err != nil {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("rule").AtName("entries_json"),
-				"Invalid entries_json",
-				"entries_json must be a JSON array, got: "+err.Error(),
-			)
-		}
-	}
-
 	for i, g := range rule.Groups {
 		groupJSONDefined := !g.EntriesJSON.IsNull() && !g.EntriesJSON.IsUnknown()
 		groupJSONRaw := ""
@@ -485,19 +561,6 @@ func (r *GlobalFilterResource) ValidateConfig(ctx context.Context, req resource.
 				"Conflicting group entry definitions",
 				"'entries_json' is mutually exclusive with 'entry' blocks within the same group.",
 			)
-		}
-		// Basic format validation for nested entries_json: must be a JSON array if set.
-		// We don't enforce the full schema here since it's complex and validated
-		// by the API, but we can catch basic mistakes like invalid JSON or not an array.
-		if gJSONSet {
-			var arr []interface{}
-			if err := json.Unmarshal([]byte(groupJSONRaw), &arr); err != nil {
-				resp.Diagnostics.AddAttributeError(
-					path.Root("rule").AtName("group").AtListIndex(i).AtName("entries_json"),
-					"Invalid entries_json",
-					"entries_json must be a JSON array, got: "+err.Error(),
-				)
-			}
 		}
 	}
 }
