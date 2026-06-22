@@ -207,7 +207,7 @@ Optional:
 
 Required:
 
-- `type` (String) Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).
+- `type` (String) Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tag, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).
 - `value` (String) Value or regex to match.
 
 Optional:
@@ -233,7 +233,7 @@ Optional:
 
 Required:
 
-- `type` (String) Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).
+- `type` (String) Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tag, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).
 - `value` (String)
 
 Optional:
