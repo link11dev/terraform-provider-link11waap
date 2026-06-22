@@ -753,7 +753,7 @@ func TestEntriesJSONLeafValidator(t *testing.T) {
 		},
 		{
 			name:  "all known types accepted",
-			input: `[["asn","100",""],["ip","1.2.3.4",""],["path","/",""],["country","DE",""],["method","GET",""],["headers","",""],["cookies","",""],["uri","/x",""],["query","q",""],["region","EU",""],["subregion","x",""],["tags","t",""],["session","s",""],["network","net",""],["authority","a",""],["company","c",""],["organization","o",""],["securitypolicy","sp",""],["securitypolicyentry","spe",""],["securitypolicyentryid","spei",""],["securitypolicyentryname","spen",""],["securitypolicyid","spi",""],["securitypolicyname","spn",""],["secpolentryid","sei",""],["secpolid","si",""],["secpolentryname","sen",""],["secpolname","sn",""]]`,
+			input: `[["asn","100",""],["ip","1.2.3.4",""],["path","/",""],["country","DE",""],["method","GET",""],["headers","",""],["cookies","",""],["uri","/x",""],["query","q",""],["region","EU",""],["subregion","x",""],["tag","t",""],["session","s",""],["network","net",""],["authority","a",""],["company","c",""],["organization","o",""],["securitypolicy","sp",""],["securitypolicyentry","spe",""],["securitypolicyentryid","spei",""],["securitypolicyentryname","spen",""],["securitypolicyid","spi",""],["securitypolicyname","spn",""],["secpolentryid","sei",""],["secpolid","si",""],["secpolentryname","sen",""],["secpolname","sn",""]]`,
 		},
 	}
 

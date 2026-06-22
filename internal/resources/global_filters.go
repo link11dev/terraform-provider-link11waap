@@ -37,7 +37,7 @@ var validEntryTypes = map[string]struct{}{
 	"secpolentryname": {}, "secpolname": {}, "securitypolicy": {},
 	"securitypolicyentry": {}, "securitypolicyentryid": {},
 	"securitypolicyentryname": {}, "securitypolicyid": {},
-	"securitypolicyname": {}, "session": {}, "subregion": {}, "tags": {}, "uri": {},
+	"securitypolicyname": {}, "session": {}, "subregion": {}, "tag": {}, "uri": {},
 }
 
 const entriesJSONMaxErrors = 20
@@ -269,7 +269,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 							Attributes: map[string]schema.Attribute{
 								"type": schema.StringAttribute{
 									Required:    true,
-									Description: "Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).",
+									Description: "Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tag, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).",
 									Validators: []validator.String{
 										stringvalidator.OneOf(
 											"asn", "authority", "company", "cookies", "country", "headers",
@@ -278,7 +278,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 											"secpolname", "securitypolicy", "securitypolicyentry",
 											"securitypolicyentryid", "securitypolicyentryname",
 											"securitypolicyid", "securitypolicyname", "session",
-											"subregion", "tags", "uri",
+											"subregion", "tag", "uri",
 										),
 									},
 								},
@@ -318,7 +318,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 										Attributes: map[string]schema.Attribute{
 											"type": schema.StringAttribute{
 												Required:    true,
-												Description: "Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tags, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).",
+												Description: "Entry category. Valid values from AttributesEnum: asn, authority, company, cookies, country, headers, ip, method, network, organization, path, query, region, secpolentryid, secpolid, secpolentryname, secpolname, securitypolicy, securitypolicyentry, securitypolicyentryid, securitypolicyentryname, securitypolicyid, securitypolicyname, session, subregion, tag, uri. Use 'name' + 'value' for types that match against a named field (e.g. headers, cookies).",
 												Validators: []validator.String{
 													stringvalidator.OneOf(
 														"asn", "authority", "company", "cookies", "country", "headers",
@@ -327,7 +327,7 @@ func (r *GlobalFilterResource) Schema(_ context.Context, _ resource.SchemaReques
 														"secpolname", "securitypolicy", "securitypolicyentry",
 														"securitypolicyentryid", "securitypolicyentryname",
 														"securitypolicyid", "securitypolicyname", "session",
-														"subregion", "tags", "uri",
+														"subregion", "tag", "uri",
 													),
 												},
 											},
