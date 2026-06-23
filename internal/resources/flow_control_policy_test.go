@@ -2,11 +2,16 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
+	"github.com/stretchr/testify/assert"
 )
 
 func strPtr(s string) *string { return &s }
@@ -222,6 +227,26 @@ func TestParseFlowControlSteps(t *testing.T) {
 	}
 }
 
+// fcKeyObjType returns the tftypes.Object type matching the key nested block.
+func fcKeyObjType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String,
+		"cookies": tftypes.String, "headers": tftypes.String,
+	}}
+}
+
+// fcStepObjType returns the tftypes.Object type matching the steps nested block.
+func fcStepObjType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"method":  tftypes.String,
+		"uri":     tftypes.String,
+		"headers": tftypes.Map{ElementType: tftypes.String},
+		"cookies": tftypes.Map{ElementType: tftypes.String},
+		"args":    tftypes.Map{ElementType: tftypes.String},
+		"plugins": tftypes.Map{ElementType: tftypes.String},
+	}}
+}
+
 func TestBuildFlowControlPolicyAPIModel_BasicFields(t *testing.T) {
 	ctx := context.Background()
 	tags, _ := types.ListValueFrom(ctx, types.StringType, []string{"t1"})
@@ -267,4 +292,331 @@ func TestBuildFlowControlPolicyAPIModel_BasicFields(t *testing.T) {
 	if len(policy.Steps) != 1 {
 		t.Errorf("expected 1 step, got %d", len(policy.Steps))
 	}
+}
+
+func TestBuildFlowControlPolicyAPIModel_NonNullExclude(t *testing.T) {
+	ctx := context.Background()
+	exclude, _ := types.ListValueFrom(ctx, types.StringType, []string{"excl1"})
+
+	plan := &FlowControlPolicyResourceModel{
+		ID:          types.StringValue("fc-1"),
+		Name:        types.StringValue("flow"),
+		Description: types.StringValue(""),
+		Active:      types.BoolValue(false),
+		Timeframe:   types.Int64Value(30),
+		Tags:        types.ListNull(types.StringType),
+		Include:     types.ListNull(types.StringType),
+		Exclude:     exclude,
+		Key:         []FlowControlKeyModel{},
+		Steps:       []FlowControlStepModel{},
+		ConfigID:    types.StringValue("cfg1"),
+	}
+
+	policy, diags := buildFlowControlPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	if len(policy.Exclude) != 1 || policy.Exclude[0] != "excl1" {
+		t.Errorf("expected exclude=['excl1'], got %v", policy.Exclude)
+	}
+}
+
+func TestBuildFlowControlSteps_AllMaps(t *testing.T) {
+	ctx := context.Background()
+	cookies, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{"sid": "abc"})
+	args, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{"step": "2"})
+	plugins, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{"key": "val"})
+
+	steps := []FlowControlStepModel{
+		{
+			Method:  types.StringValue("POST"),
+			URI:     types.StringValue("/submit"),
+			Headers: types.MapNull(types.StringType),
+			Cookies: cookies,
+			Args:    args,
+			Plugins: plugins,
+		},
+	}
+	var diags diag.Diagnostics
+	result := buildFlowControlSteps(ctx, steps, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(result))
+	}
+	if result[0].Cookies["sid"] != "abc" {
+		t.Error("expected cookies sid=abc")
+	}
+	if result[0].Args["step"] != "2" {
+		t.Error("expected args step=2")
+	}
+	if result[0].Plugins["key"] != "val" {
+		t.Error("expected plugins key=val")
+	}
+}
+
+func TestParseFlowControlSteps_AllMaps(t *testing.T) {
+	ctx := context.Background()
+	steps := []client.FlowStepItem{
+		{
+			Method:  "GET",
+			URI:     "/page",
+			Headers: map[string]string{"X-Custom": "val"},
+			Cookies: map[string]string{"sid": "123"},
+			Args:    map[string]string{},
+			Plugins: map[string]string{"plugin-key": "plugin-val"},
+		},
+	}
+	var diags diag.Diagnostics
+	result := parseFlowControlSteps(ctx, steps, &diags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(result))
+	}
+	if result[0].Headers.IsNull() {
+		t.Error("expected non-null headers")
+	}
+	if result[0].Cookies.IsNull() {
+		t.Error("expected non-null cookies")
+	}
+	if result[0].Plugins.IsNull() {
+		t.Error("expected non-null plugins")
+	}
+	if !result[0].Args.IsNull() {
+		t.Error("expected null args for empty map")
+	}
+}
+
+// ---- CRUD with failing client ----
+
+func TestFlowControlPolicyResource_CRUD_WithFailingClient(t *testing.T) {
+	r := &FlowControlPolicyResource{}
+	planVals := map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, nil),
+		"name":        tftypes.NewValue(tftypes.String, "test-flow"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"active":      tftypes.NewValue(tftypes.Bool, true),
+		"timeframe":   tftypes.NewValue(tftypes.Number, 60),
+	}
+	stateVals := map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "fc1"),
+	}
+
+	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, planVals) })
+	t.Run("Read", func(t *testing.T) { crudReadWithClient(t, r, stateVals) })
+	t.Run("Update", func(t *testing.T) { crudUpdateWithClient(t, r, planVals) })
+	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, stateVals) })
+}
+
+// ---- Read with mock ----
+
+func TestFlowControlPolicyResource_Read_WithMock(t *testing.T) {
+	r := &FlowControlPolicyResource{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.FlowControl{
+			ID:          "fc1",
+			Name:        "test-flow",
+			Description: "a flow",
+			Active:      true,
+			Timeframe:   60,
+			Tags:        []string{"tag1"},
+			Include:     []string{"inc1"},
+			Exclude:     []string{"exc1"},
+			Key:         []client.FlowControlKeyEntry{{Attrs: strPtr("ip")}},
+			Steps: []client.FlowStepItem{
+				{Method: "GET", URI: "/test", Headers: map[string]string{}, Cookies: map[string]string{}, Args: map[string]string{}},
+			},
+		})
+	})
+	configureResourceWithMock(t, r, handler)
+
+	resp := readWithMock(t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "fc1"),
+	})
+
+	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+}
+
+func TestFlowControlPolicyResource_Read_NotFound(t *testing.T) {
+	r := &FlowControlPolicyResource{}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"not found"}`))
+	})
+	configureResourceWithMock(t, r, handler)
+
+	resp := readWithMock(t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":        tftypes.NewValue(tftypes.String, "missing"),
+	})
+
+	assert.False(t, resp.Diagnostics.HasError())
+}
+
+// ---- ValidateConfig ----
+
+func TestFlowControlPolicyResource_ValidateConfig_Valid(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key": tftypes.NewValue(
+			tftypes.List{ElementType: keyObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(keyObjType, map[string]tftypes.Value{
+					"attrs": tftypes.NewValue(tftypes.String, "ip"), "args": tftypes.NewValue(tftypes.String, nil),
+					"plugins": tftypes.NewValue(tftypes.String, nil), "cookies": tftypes.NewValue(tftypes.String, nil),
+					"headers": tftypes.NewValue(tftypes.String, nil),
+				}),
+			},
+		),
+		"steps": tftypes.NewValue(
+			tftypes.List{ElementType: stepObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(stepObjType, map[string]tftypes.Value{
+					"method": tftypes.NewValue(tftypes.String, "GET"), "uri": tftypes.NewValue(tftypes.String, "/test"),
+					"headers": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"cookies": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"args":    tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"plugins": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+				}),
+			},
+		),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+	assert.False(t, resp.Diagnostics.HasError(), "valid config should not produce errors: %v", resp.Diagnostics)
+}
+
+func TestFlowControlPolicyResource_ValidateConfig_NoKeys(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key": tftypes.NewValue(tftypes.List{ElementType: keyObjType}, []tftypes.Value{}),
+		"steps": tftypes.NewValue(
+			tftypes.List{ElementType: stepObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(stepObjType, map[string]tftypes.Value{
+					"method": tftypes.NewValue(tftypes.String, "GET"), "uri": tftypes.NewValue(tftypes.String, "/test"),
+					"headers": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"cookies": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"args":    tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"plugins": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+				}),
+			},
+		),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+	assert.True(t, resp.Diagnostics.HasError(), "empty key list should produce error")
+}
+
+func TestFlowControlPolicyResource_ValidateConfig_KeyMultipleFields(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key": tftypes.NewValue(
+			tftypes.List{ElementType: keyObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(keyObjType, map[string]tftypes.Value{
+					"attrs": tftypes.NewValue(tftypes.String, "ip"), "args": tftypes.NewValue(tftypes.String, "q"),
+					"plugins": tftypes.NewValue(tftypes.String, nil), "cookies": tftypes.NewValue(tftypes.String, nil),
+					"headers": tftypes.NewValue(tftypes.String, nil),
+				}),
+			},
+		),
+		"steps": tftypes.NewValue(
+			tftypes.List{ElementType: stepObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(stepObjType, map[string]tftypes.Value{
+					"method": tftypes.NewValue(tftypes.String, "GET"), "uri": tftypes.NewValue(tftypes.String, "/test"),
+					"headers": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"cookies": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"args":    tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"plugins": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+				}),
+			},
+		),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+	assert.True(t, resp.Diagnostics.HasError(), "key with multiple fields should produce error")
+}
+
+func TestFlowControlPolicyResource_ValidateConfig_KeyNoFields(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key": tftypes.NewValue(
+			tftypes.List{ElementType: keyObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(keyObjType, map[string]tftypes.Value{
+					"attrs": tftypes.NewValue(tftypes.String, nil), "args": tftypes.NewValue(tftypes.String, nil),
+					"plugins": tftypes.NewValue(tftypes.String, nil), "cookies": tftypes.NewValue(tftypes.String, nil),
+					"headers": tftypes.NewValue(tftypes.String, nil),
+				}),
+			},
+		),
+		"steps": tftypes.NewValue(
+			tftypes.List{ElementType: stepObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(stepObjType, map[string]tftypes.Value{
+					"method": tftypes.NewValue(tftypes.String, "GET"), "uri": tftypes.NewValue(tftypes.String, "/test"),
+					"headers": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"cookies": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"args":    tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+					"plugins": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, nil),
+				}),
+			},
+		),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+	assert.True(t, resp.Diagnostics.HasError(), "key with no fields should produce error")
+}
+
+func TestFlowControlPolicyResource_ValidateConfig_NoSteps(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key": tftypes.NewValue(
+			tftypes.List{ElementType: keyObjType},
+			[]tftypes.Value{
+				tftypes.NewValue(keyObjType, map[string]tftypes.Value{
+					"attrs": tftypes.NewValue(tftypes.String, "ip"), "args": tftypes.NewValue(tftypes.String, nil),
+					"plugins": tftypes.NewValue(tftypes.String, nil), "cookies": tftypes.NewValue(tftypes.String, nil),
+					"headers": tftypes.NewValue(tftypes.String, nil),
+				}),
+			},
+		),
+		"steps": tftypes.NewValue(tftypes.List{ElementType: stepObjType}, []tftypes.Value{}),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+	assert.True(t, resp.Diagnostics.HasError(), "empty steps list should produce error")
 }
