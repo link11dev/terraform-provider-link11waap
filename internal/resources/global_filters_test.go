@@ -2,13 +2,161 @@ package resources
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// entryObjectType is the tftypes object shape for a leaf entry block.
+var entryObjectType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+	"type":    tftypes.String,
+	"name":    tftypes.String,
+	"value":   tftypes.String,
+	"comment": tftypes.String,
+}}
+
+// groupObjectType is the tftypes object shape for a group block.
+var groupObjectType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+	"relation":     tftypes.String,
+	"entries_json": tftypes.String,
+	"entry":        tftypes.List{ElementType: entryObjectType},
+}}
+
+// ruleObjectType is the tftypes object shape for the rule block.
+var ruleObjectType = tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+	"relation":     tftypes.String,
+	"entries_json": tftypes.String,
+	"entry":        tftypes.List{ElementType: entryObjectType},
+	"group":        tftypes.List{ElementType: groupObjectType},
+}}
+
+// newEntryValue builds a tftypes value for a leaf entry block.
+func newEntryValue(typ, value, comment string) tftypes.Value {
+	return tftypes.NewValue(entryObjectType, map[string]tftypes.Value{
+		"type":    tftypes.NewValue(tftypes.String, typ),
+		"name":    tftypes.NewValue(tftypes.String, nil),
+		"value":   tftypes.NewValue(tftypes.String, value),
+		"comment": tftypes.NewValue(tftypes.String, comment),
+	})
+}
+
+// newRuleValue builds a tftypes value for the rule block given entries_json and entry blocks.
+func newRuleValue(relation string, entriesJSON *string, entries []tftypes.Value) tftypes.Value {
+	var ejVal tftypes.Value
+	if entriesJSON == nil {
+		ejVal = tftypes.NewValue(tftypes.String, nil)
+	} else {
+		ejVal = tftypes.NewValue(tftypes.String, *entriesJSON)
+	}
+	if entries == nil {
+		entries = []tftypes.Value{}
+	}
+	return tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, relation),
+		"entries_json": ejVal,
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, entries),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{}),
+	})
+}
+
+func TestGlobalFilterResource_ValidateConfig_MutualExclusion(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	ej := `[["path","/api/",""]]`
+
+	testCases := []struct {
+		name      string
+		rule      tftypes.Value
+		expectErr bool
+	}{
+		{
+			name:      "only entries_json",
+			rule:      newRuleValue("OR", &ej, nil),
+			expectErr: false,
+		},
+		{
+			name:      "only entry blocks",
+			rule:      newRuleValue("OR", nil, []tftypes.Value{newEntryValue("path", "/api/", "")}),
+			expectErr: false,
+		},
+		{
+			name:      "both entries_json and entry blocks",
+			rule:      newRuleValue("OR", &ej, []tftypes.Value{newEntryValue("path", "/api/", "")}),
+			expectErr: true,
+		},
+		{
+			name: "entries_json set, zero entry blocks, one group block",
+			rule: tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+				"relation":     tftypes.NewValue(tftypes.String, "OR"),
+				"entries_json": tftypes.NewValue(tftypes.String, ej),
+				"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+				"group": tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{
+					tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+						"relation":     tftypes.NewValue(tftypes.String, "AND"),
+						"entries_json": tftypes.NewValue(tftypes.String, nil),
+						"entry": tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{
+							newEntryValue("path", "/api/", ""),
+						}),
+					}),
+				}),
+			}),
+			expectErr: true,
+		},
+		{
+			name:      "neither set",
+			rule:      newRuleValue("OR", nil, nil),
+			expectErr: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+				"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+				"name":      tftypes.NewValue(tftypes.String, "test"),
+				"rule":      tc.rule,
+			})
+
+			req := resource.ValidateConfigRequest{Config: config}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, req, resp)
+
+			if tc.expectErr {
+				assert.True(t, resp.Diagnostics.HasError(), "expected mutual-exclusion error")
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "did not expect an error")
+			}
+		})
+	}
+}
+
+func TestGlobalFilterResource_ValidateConfig_NilRule(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      tftypes.NewValue(ruleObjectType, nil),
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+
+	assert.False(t, resp.Diagnostics.HasError(), "nil rule should not produce errors")
+}
 
 func TestNewGlobalFilterResource(t *testing.T) {
 	r := NewGlobalFilterResource()
@@ -52,8 +200,21 @@ func TestGlobalFilterResource_Schema(t *testing.T) {
 	_, inAttrs := s.Attributes["rule"]
 	assert.False(t, inAttrs, "rule should not be in Attributes")
 
-	_, inBlocks := s.Blocks["rule"]
+	ruleBlock, inBlocks := s.Blocks["rule"]
 	assert.True(t, inBlocks, "rule should be in Blocks")
+
+	// entries_json should be an Optional-only StringAttribute inside the rule block
+	ruleNested, ok := ruleBlock.(schema.SingleNestedBlock)
+	require.True(t, ok, "rule should be a SingleNestedBlock")
+	entriesJSONAttr, ok := ruleNested.Attributes["entries_json"]
+	require.True(t, ok, "expected entries_json attribute in rule block")
+	ejStr, ok := entriesJSONAttr.(schema.StringAttribute)
+	require.True(t, ok, "entries_json should be a StringAttribute")
+	assert.True(t, ejStr.Optional, "entries_json should be Optional")
+	assert.False(t, ejStr.Computed, "entries_json should not be Computed")
+	assert.False(t, ejStr.Required, "entries_json should not be Required")
+	_, isNormalized := ejStr.CustomType.(jsontypes.NormalizedType)
+	assert.True(t, isNormalized, "entries_json should use jsontypes.NormalizedType")
 
 	// source should be Computed only (not Required, not Optional)
 	sourceAttr, ok := s.Attributes["source"]
@@ -312,7 +473,7 @@ func TestApiRuleToModel_SimpleEntries(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw)
+	model, err := apiRuleToModel(raw, nil)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
@@ -335,7 +496,7 @@ func TestApiRuleToModel_NamedEntry(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw)
+	model, err := apiRuleToModel(raw, nil)
 	require.NoError(t, err)
 	require.Len(t, model.Entries, 1)
 
@@ -361,7 +522,7 @@ func TestApiRuleToModel_WithGroup(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw)
+	model, err := apiRuleToModel(raw, nil)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
@@ -383,13 +544,13 @@ func TestApiRuleToModel_WithGroup(t *testing.T) {
 }
 
 func TestApiRuleToModel_Nil(t *testing.T) {
-	model, err := apiRuleToModel(nil)
+	model, err := apiRuleToModel(nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, model)
 }
 
 func TestApiRuleToModel_InvalidType(t *testing.T) {
-	_, err := apiRuleToModel("not a map")
+	_, err := apiRuleToModel("not a map", nil)
 	assert.Error(t, err)
 }
 
@@ -431,11 +592,12 @@ func TestRuleRoundTrip(t *testing.T) {
 	}
 
 	// Convert to API format
-	apiData := ruleModelToAPI(original)
+	apiData, apiDiags := ruleModelToAPI(original)
+	require.False(t, apiDiags.HasError())
 	require.NotNil(t, apiData)
 
 	// Convert back to model
-	result, err := apiRuleToModel(apiData)
+	result, err := apiRuleToModel(apiData, nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -457,6 +619,310 @@ func TestRuleRoundTrip(t *testing.T) {
 	assert.Equal(t, "AND", result.Groups[0].Relation.ValueString())
 	require.Len(t, result.Groups[0].Entries, 1)
 	assert.Equal(t, "asn", result.Groups[0].Entries[0].Type.ValueString())
+}
+
+func TestRuleModelToAPI_EntriesJSON(t *testing.T) {
+	rule := &RuleModel{
+		Relation:    types.StringValue("OR"),
+		EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/api/","API path"],["ip","203.0.113.0/24","Suspicious subnet"]]`),
+	}
+
+	apiData, diags := ruleModelToAPI(rule)
+	require.False(t, diags.HasError())
+	require.NotNil(t, apiData)
+
+	ruleMap, ok := apiData.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "OR", ruleMap["relation"])
+
+	entries, ok := ruleMap["entries"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, entries, 2)
+
+	first, ok := entries[0].([]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "path", first[0])
+	assert.Equal(t, "/api/", first[1])
+	assert.Equal(t, "API path", first[2])
+
+	second, ok := entries[1].([]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ip", second[0])
+	assert.Equal(t, "203.0.113.0/24", second[1])
+	assert.Equal(t, "Suspicious subnet", second[2])
+}
+
+func TestRuleModelToAPI_EntriesJSON_EmptyArray(t *testing.T) {
+	rule := &RuleModel{
+		Relation:    types.StringValue("OR"),
+		EntriesJSON: jsontypes.NewNormalizedValue(`[]`),
+	}
+
+	apiData, diags := ruleModelToAPI(rule)
+	require.False(t, diags.HasError())
+
+	ruleMap := apiData.(map[string]interface{})
+	entries, ok := ruleMap["entries"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, entries, 0)
+}
+
+func TestRuleModelToAPI_EntriesJSON_Invalid(t *testing.T) {
+	rule := &RuleModel{
+		Relation:    types.StringValue("OR"),
+		EntriesJSON: jsontypes.NewNormalizedValue(`not valid json`),
+	}
+
+	apiData, diags := ruleModelToAPI(rule)
+	assert.True(t, diags.HasError(), "invalid entries_json should produce a diagnostic")
+	assert.Nil(t, apiData)
+}
+
+func diagMessages(resp *validator.StringResponse) string {
+	var parts []string
+	for _, d := range resp.Diagnostics {
+		parts = append(parts, d.Summary()+": "+d.Detail())
+	}
+	return strings.Join(parts, "\n")
+}
+
+func TestEntriesJSONLeafValidator(t *testing.T) {
+	v := entriesJSONLeafValidator{}
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		input       string
+		null        bool
+		wantError   bool
+		errContains string
+	}{
+		{
+			name:  "valid flat entries",
+			input: `[["path","/api/","API path"],["ip","203.0.113.0/24",""]]`,
+		},
+		{
+			name:  "empty array",
+			input: `[]`,
+		},
+		{
+			name: "null value is skipped",
+			null: true,
+		},
+		{
+			name:        "not a JSON array — object",
+			input:       `{"key":"value"}`,
+			wantError:   true,
+			errContains: "must be a JSON array",
+		},
+		{
+			name:        "contains a group object",
+			input:       `[["path","/api/","ok"],{"relation":"AND","entries":[]}]`,
+			wantError:   true,
+			errContains: "entry[1]: must be a JSON array",
+		},
+		{
+			name:        "tuple has wrong length — too short",
+			input:       `[["path","/api/"]]`,
+			wantError:   true,
+			errContains: "must have exactly 3 elements",
+		},
+		{
+			name:        "tuple has wrong length — too long",
+			input:       `[["path","/api/","comment","extra"]]`,
+			wantError:   true,
+			errContains: "must have exactly 3 elements",
+		},
+		{
+			name:        "value field is not a string",
+			input:       `[["path",123,""]]`,
+			wantError:   true,
+			errContains: "must be a string",
+		},
+		{
+			name:        "type field is a nested array",
+			input:       `[[["nested"],"value",""]]`,
+			wantError:   true,
+			errContains: "must be a string",
+		},
+		{
+			name:        "unknown type",
+			input:       `[["not-a-type","value",""]]`,
+			wantError:   true,
+			errContains: "unknown type",
+		},
+		{
+			name:  "all known types accepted",
+			input: `[["asn","100",""],["ip","1.2.3.4",""],["path","/",""],["country","DE",""],["method","GET",""],["headers","",""],["cookies","",""],["uri","/x",""],["query","q",""],["region","EU",""],["subregion","x",""],["tag","t",""],["session","s",""],["network","net",""],["authority","a",""],["company","c",""],["organization","o",""],["securitypolicy","sp",""],["securitypolicyentry","spe",""],["securitypolicyentryid","spei",""],["securitypolicyentryname","spen",""],["securitypolicyid","spi",""],["securitypolicyname","spn",""],["secpolentryid","sei",""],["secpolid","si",""],["secpolentryname","sen",""],["secpolname","sn",""]]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var configValue types.String
+			if tc.null {
+				configValue = types.StringNull()
+			} else {
+				configValue = types.StringValue(tc.input)
+			}
+			req := validator.StringRequest{
+				Path:        path.Root("entries_json"),
+				ConfigValue: configValue,
+			}
+			resp := &validator.StringResponse{}
+			v.ValidateString(ctx, req, resp)
+
+			if tc.wantError {
+				require.True(t, resp.Diagnostics.HasError(), "expected validation error for input: %s", tc.input)
+				if tc.errContains != "" {
+					assert.Contains(t, diagMessages(resp), tc.errContains)
+				}
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected error: %s", diagMessages(resp))
+			}
+		})
+	}
+}
+
+func TestEntriesJSONLeafValidator_StopsAfterMaxErrors(t *testing.T) {
+	v := entriesJSONLeafValidator{}
+	ctx := context.Background()
+
+	// Build an array with 25 bad entries (objects instead of arrays).
+	parts := make([]string, 25)
+	for i := range parts {
+		parts[i] = fmt.Sprintf(`{"bad":%d}`, i)
+	}
+	input := "[" + strings.Join(parts, ",") + "]"
+
+	req := validator.StringRequest{
+		Path:        path.Root("entries_json"),
+		ConfigValue: types.StringValue(input),
+	}
+	resp := &validator.StringResponse{}
+	v.ValidateString(ctx, req, resp)
+
+	require.True(t, resp.Diagnostics.HasError())
+	// Should have exactly entriesJSONMaxErrors entry errors + 1 stop message.
+	assert.Equal(t, entriesJSONMaxErrors+1, len(resp.Diagnostics))
+	assert.Contains(t, diagMessages(resp), "validation stopped after")
+}
+
+func TestRuleModelToAPI_EntriesJSON_EmptyStringUsesBlocks(t *testing.T) {
+	rule := &RuleModel{
+		Relation:    types.StringValue("OR"),
+		EntriesJSON: jsontypes.NewNormalizedValue(""),
+		Entries: []EntryModel{
+			{
+				Type:    types.StringValue("path"),
+				Name:    types.StringNull(),
+				Value:   types.StringValue("/api/"),
+				Comment: types.StringValue(""),
+			},
+		},
+	}
+
+	apiData, diags := ruleModelToAPI(rule)
+	require.False(t, diags.HasError())
+
+	ruleMap := apiData.(map[string]interface{})
+	entries := ruleMap["entries"].([]interface{})
+	require.Len(t, entries, 1)
+	entry := entries[0].([]interface{})
+	assert.Equal(t, "path", entry[0])
+}
+
+func TestRuleModelToAPI_NilRule(t *testing.T) {
+	apiData, diags := ruleModelToAPI(nil)
+	require.False(t, diags.HasError())
+	assert.Nil(t, apiData)
+}
+
+func TestApiRuleToModel_PriorUsedJSON(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "OR",
+		"entries": []interface{}{
+			[]interface{}{"path", "/api/", "API path"},
+			map[string]interface{}{
+				"relation": "AND",
+				"entries": []interface{}{
+					[]interface{}{"asn", "100", ""},
+				},
+			},
+		},
+	}
+
+	prior := &RuleModel{
+		EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/api/","API path"]]`),
+	}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.NotNil(t, model)
+
+	// Block fields should be empty; entries_json should be populated.
+	assert.Empty(t, model.Entries)
+	assert.Empty(t, model.Groups)
+	assert.False(t, model.EntriesJSON.IsNull())
+
+	// entries_json should semantically match the API entries array.
+	expected := jsontypes.NewNormalizedValue(`[["path","/api/","API path"],{"relation":"AND","entries":[["asn","100",""]]}]`)
+	eq, eqDiags := model.EntriesJSON.StringSemanticEquals(context.Background(), expected)
+	require.False(t, eqDiags.HasError())
+	assert.True(t, eq, "entries_json should semantically equal the round-tripped entries")
+}
+
+func TestApiRuleToModel_PriorUsedJSON_EmptyEntries(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "OR",
+	}
+
+	prior := &RuleModel{
+		EntriesJSON: jsontypes.NewNormalizedValue(`[]`),
+	}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.NotNil(t, model)
+
+	assert.Empty(t, model.Entries)
+	assert.Empty(t, model.Groups)
+	assert.Equal(t, "[]", model.EntriesJSON.ValueString())
+}
+
+func TestApiRuleToModel_PriorNilUsesBlocks(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "OR",
+		"entries": []interface{}{
+			[]interface{}{"path", "/api/", ""},
+		},
+	}
+
+	model, err := apiRuleToModel(raw, nil)
+	require.NoError(t, err)
+	require.NotNil(t, model)
+
+	// With nil prior, block representation is used and entries_json stays null.
+	require.Len(t, model.Entries, 1)
+	assert.True(t, model.EntriesJSON.IsNull())
+}
+
+func TestApiRuleToModel_PriorNoJSONUsesBlocks(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "OR",
+		"entries": []interface{}{
+			[]interface{}{"path", "/api/", ""},
+		},
+	}
+
+	prior := &RuleModel{EntriesJSON: jsontypes.NewNormalizedNull()}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.NotNil(t, model)
+
+	require.Len(t, model.Entries, 1)
+	assert.True(t, model.EntriesJSON.IsNull())
 }
 
 func TestBuildGlobalFilterAPIModel_ActionAlwaysSet(t *testing.T) {
@@ -530,4 +996,414 @@ func TestBuildGlobalFilterAPIModel_CookiesNamedEntry(t *testing.T) {
 	assert.Equal(t, "test", nameVal[0])
 	assert.Equal(t, "ddddd", nameVal[1])
 	assert.Equal(t, "dddd", entry[2])
+}
+
+func TestBuildGlobalFilterAPIModel_GroupWithEntriesJSON(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &GlobalFilterResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		ID:          types.StringValue("gf1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Active:      types.BoolValue(true),
+		Tags:        types.ListNull(types.StringType),
+		Action:      types.StringValue("action-monitor"),
+		Rule: &RuleModel{
+			Relation: types.StringValue("AND"),
+			Groups: []GroupModel{
+				{
+					Relation:    types.StringValue("OR"),
+					EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/admin/","Admin paths"],["uri","/.+\\.php","PHP files"]]`),
+				},
+			},
+		},
+	}
+
+	filter, diags := buildGlobalFilterAPIModel(ctx, plan)
+	require.False(t, diags.HasError())
+
+	ruleMap := filter.Rule.(map[string]interface{})
+	entries := ruleMap["entries"].([]interface{})
+	require.Len(t, entries, 1)
+
+	group := entries[0].(map[string]interface{})
+	assert.Equal(t, "OR", group["relation"])
+	groupEntries := group["entries"].([]interface{})
+	require.Len(t, groupEntries, 2)
+
+	e0 := groupEntries[0].([]interface{})
+	assert.Equal(t, "path", e0[0])
+	assert.Equal(t, "/admin/", e0[1])
+
+	e1 := groupEntries[1].([]interface{})
+	assert.Equal(t, "uri", e1[0])
+}
+
+func TestApiRuleToModel_GroupPriorUsedJSON(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "AND",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"relation": "OR",
+				"entries": []interface{}{
+					[]interface{}{"path", "/admin/", "Admin paths"},
+					[]interface{}{"uri", `/.+\.php`, "PHP files"},
+				},
+			},
+		},
+	}
+
+	prior := &RuleModel{
+		Relation: types.StringValue("AND"),
+		Groups: []GroupModel{
+			{
+				Relation:    types.StringValue("OR"),
+				EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/old/",""]]`),
+			},
+		},
+	}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.Len(t, model.Groups, 1)
+
+	g := model.Groups[0]
+	assert.Equal(t, "OR", g.Relation.ValueString())
+	assert.Empty(t, g.Entries)
+	assert.False(t, g.EntriesJSON.IsNull())
+
+	expected := jsontypes.NewNormalizedValue(`[["path","/admin/","Admin paths"],["uri","/.+\\.php","PHP files"]]`)
+	eq, eqDiags := g.EntriesJSON.StringSemanticEquals(context.Background(), expected)
+	require.False(t, eqDiags.HasError())
+	assert.True(t, eq)
+}
+
+func TestApiRuleToModel_GroupPriorUsedBlocksKeepsBlocks(t *testing.T) {
+	raw := map[string]interface{}{
+		"relation": "AND",
+		"entries": []interface{}{
+			map[string]interface{}{
+				"relation": "OR",
+				"entries": []interface{}{
+					[]interface{}{"path", "/admin/", ""},
+				},
+			},
+		},
+	}
+
+	prior := &RuleModel{
+		Relation: types.StringValue("AND"),
+		Groups: []GroupModel{
+			{
+				Relation:    types.StringValue("OR"),
+				EntriesJSON: jsontypes.NewNormalizedNull(),
+			},
+		},
+	}
+
+	model, err := apiRuleToModel(raw, prior)
+	require.NoError(t, err)
+	require.Len(t, model.Groups, 1)
+
+	g := model.Groups[0]
+	assert.True(t, g.EntriesJSON.IsNull())
+	require.Len(t, g.Entries, 1)
+	assert.Equal(t, "path", g.Entries[0].Type.ValueString())
+}
+
+func TestGlobalFilterResource_ValidateConfig_GroupMutualExclusion(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	ej := `[["path","/api/",""]]`
+
+	groupWithBoth := tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "OR"),
+		"entries_json": tftypes.NewValue(tftypes.String, ej),
+		"entry": tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{
+			newEntryValue("path", "/api/", ""),
+		}),
+	})
+
+	ruleVal := tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "AND"),
+		"entries_json": tftypes.NewValue(tftypes.String, nil),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{groupWithBoth}),
+	})
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      ruleVal,
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+
+	assert.True(t, resp.Diagnostics.HasError(), "expected mutual-exclusion error for group entries_json + entry blocks")
+}
+
+func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONOnly(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	ej := `[["path","/api/",""]]`
+
+	groupWithJSON := tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "OR"),
+		"entries_json": tftypes.NewValue(tftypes.String, ej),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+	})
+
+	ruleVal := tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "AND"),
+		"entries_json": tftypes.NewValue(tftypes.String, nil),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{groupWithJSON}),
+	})
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      ruleVal,
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+	r.ValidateConfig(ctx, req, resp)
+
+	assert.False(t, resp.Diagnostics.HasError(), "group with only entries_json should be valid: %v", resp.Diagnostics)
+}
+
+func TestGlobalFilterResource_ValidateConfig_RuleEntriesJSONNotArray(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	// ValidateConfig only checks empty/whitespace and mutual-exclusivity.
+	// JSON structure (array-of-3-string-tuples) is enforced by entriesJSONLeafValidator
+	// at schema level; see TestEntriesJSONLeafValidator for those cases.
+	testCases := []struct {
+		name        string
+		entriesJSON string
+		expectErr   bool
+	}{
+		{
+			name:        "valid array",
+			entriesJSON: `[["path","/api/",""]]`,
+			expectErr:   false,
+		},
+		{
+			name:        "empty array",
+			entriesJSON: `[]`,
+			expectErr:   false,
+		},
+		{
+			name:        "object instead of array — caught by schema validator not ValidateConfig",
+			entriesJSON: `{"key":"value"}`,
+			expectErr:   false,
+		},
+		{
+			name:        "plain string — caught by schema validator not ValidateConfig",
+			entriesJSON: `"just a string"`,
+			expectErr:   false,
+		},
+		{
+			name:        "empty string",
+			entriesJSON: "",
+			expectErr:   true,
+		},
+		{
+			name:        "whitespace string",
+			entriesJSON: "   \n\t  ",
+			expectErr:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+				"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+				"name":      tftypes.NewValue(tftypes.String, "test"),
+				"rule":      newRuleValue("OR", &tc.entriesJSON, nil),
+			})
+
+			req := resource.ValidateConfigRequest{Config: config}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, req, resp)
+
+			if tc.expectErr {
+				assert.True(t, resp.Diagnostics.HasError(), "expected error for entries_json=%q", tc.entriesJSON)
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected error for entries_json=%q: %v", tc.entriesJSON, resp.Diagnostics)
+			}
+		})
+	}
+}
+
+func TestUnmarshalEntriesJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantLen   int
+		wantError bool
+	}{
+		{
+			name:    "valid array of tuples",
+			input:   `[["path","/api/","comment"],["ip","1.2.3.4",""]]`,
+			wantLen: 2,
+		},
+		{
+			name:    "empty array",
+			input:   `[]`,
+			wantLen: 0,
+		},
+		{
+			name:      "invalid JSON",
+			input:     `not valid json`,
+			wantError: true,
+		},
+		{
+			name:      "JSON object instead of array",
+			input:     `{"key":"value"}`,
+			wantError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entries, err := unmarshalEntriesJSON(tc.input)
+			if tc.wantError {
+				assert.Error(t, err)
+				assert.Nil(t, entries)
+			} else {
+				require.NoError(t, err)
+				assert.Len(t, entries, tc.wantLen)
+			}
+		})
+	}
+}
+
+func TestEvalEntriesJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		v         jsontypes.Normalized
+		wantEmpty bool
+		wantSet   bool
+	}{
+		{
+			name:      "null — not empty, not set",
+			v:         jsontypes.NewNormalizedNull(),
+			wantEmpty: false,
+			wantSet:   false,
+		},
+		{
+			name:      "unknown — not empty, not set",
+			v:         jsontypes.NewNormalizedUnknown(),
+			wantEmpty: false,
+			wantSet:   false,
+		},
+		{
+			name:      "non-empty value — not empty, is set",
+			v:         jsontypes.NewNormalizedValue(`[["path","/api/",""]]`),
+			wantEmpty: false,
+			wantSet:   true,
+		},
+		{
+			name:      "empty string — is empty, not set",
+			v:         jsontypes.NewNormalizedValue(""),
+			wantEmpty: true,
+			wantSet:   false,
+		},
+		{
+			name:      "whitespace-only string — is empty, not set",
+			v:         jsontypes.NewNormalizedValue("   \n\t  "),
+			wantEmpty: true,
+			wantSet:   false,
+		},
+		{
+			name:      "valid JSON array — not empty, is set",
+			v:         jsontypes.NewNormalizedValue(`[]`),
+			wantEmpty: false,
+			wantSet:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			isEmpty, isSet := evalEntriesJSON(tc.v)
+			assert.Equal(t, tc.wantEmpty, isEmpty, "isEmpty")
+			assert.Equal(t, tc.wantSet, isSet, "isSet")
+		})
+	}
+}
+
+func TestGlobalFilterResource_ValidateConfig_GroupEntriesJSONNotArray(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	buildRuleWithGroupJSON := func(ej string) tftypes.Value {
+		group := tftypes.NewValue(groupObjectType, map[string]tftypes.Value{
+			"relation":     tftypes.NewValue(tftypes.String, "OR"),
+			"entries_json": tftypes.NewValue(tftypes.String, ej),
+			"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+		})
+		return tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+			"relation":     tftypes.NewValue(tftypes.String, "AND"),
+			"entries_json": tftypes.NewValue(tftypes.String, nil),
+			"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, []tftypes.Value{}),
+			"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, []tftypes.Value{group}),
+		})
+	}
+
+	testCases := []struct {
+		name        string
+		entriesJSON string
+		expectErr   bool
+	}{
+		// ValidateConfig only checks empty/whitespace and mutual-exclusivity.
+		// JSON structure is enforced by entriesJSONLeafValidator at schema level.
+		{
+			name:        "valid array",
+			entriesJSON: `[["path","/api/",""]]`,
+			expectErr:   false,
+		},
+		{
+			name:        "object instead of array — caught by schema validator not ValidateConfig",
+			entriesJSON: `{"key":"value"}`,
+			expectErr:   false,
+		},
+		{
+			name:        "empty string",
+			entriesJSON: "",
+			expectErr:   true,
+		},
+		{
+			name:        "whitespace string",
+			entriesJSON: "   ",
+			expectErr:   true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+				"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+				"name":      tftypes.NewValue(tftypes.String, "test"),
+				"rule":      buildRuleWithGroupJSON(tc.entriesJSON),
+			})
+
+			req := resource.ValidateConfigRequest{Config: config}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, req, resp)
+
+			if tc.expectErr {
+				assert.True(t, resp.Diagnostics.HasError(), "expected error for group entries_json=%q", tc.entriesJSON)
+			} else {
+				assert.False(t, resp.Diagnostics.HasError(), "unexpected error for group entries_json=%q: %v", tc.entriesJSON, resp.Diagnostics)
+			}
+		})
+	}
 }
