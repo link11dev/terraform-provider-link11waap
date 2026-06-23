@@ -300,9 +300,9 @@ type FlowControlKeyEntry struct {
 type FlowStepItem struct {
 	Method  string            `json:"method"`
 	URI     string            `json:"uri"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Cookies map[string]string `json:"cookies,omitempty"`
-	Args    map[string]string `json:"args,omitempty"`
+	Headers map[string]string `json:"headers"`
+	Cookies map[string]string `json:"cookies"`
+	Args    map[string]string `json:"args"`
 	Plugins map[string]string `json:"plugins,omitempty"`
 }
 

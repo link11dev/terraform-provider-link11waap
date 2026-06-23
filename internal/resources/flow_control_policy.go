@@ -232,7 +232,7 @@ func (r *FlowControlPolicyResource) Create(ctx context.Context, req resource.Cre
 		return
 	}
 
-	plan.ID = types.StringValue(generateID())
+	plan.ID = types.StringValue(generateIDNoDash())
 
 	policy, diags := buildFlowControlPolicyAPIModel(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -521,8 +521,11 @@ func buildFlowControlSteps(ctx context.Context, steps []FlowControlStepModel, di
 	result := make([]client.FlowStepItem, 0, len(steps))
 	for _, s := range steps {
 		item := client.FlowStepItem{
-			Method: s.Method.ValueString(),
-			URI:    s.URI.ValueString(),
+			Method:  s.Method.ValueString(),
+			URI:     s.URI.ValueString(),
+			Headers: map[string]string{},
+			Cookies: map[string]string{},
+			Args:    map[string]string{},
 		}
 		if !s.Headers.IsNull() && !s.Headers.IsUnknown() {
 			m := map[string]string{}

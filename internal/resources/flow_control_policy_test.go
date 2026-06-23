@@ -190,8 +190,11 @@ func TestBuildFlowControlSteps(t *testing.T) {
 	if result[0].Headers["X-Test"] != "1" {
 		t.Error("expected headers X-Test=1")
 	}
-	if result[0].Cookies != nil {
-		t.Error("expected nil cookies for null map")
+	if result[0].Cookies == nil {
+		t.Error("expected empty map cookies for null map")
+	}
+	if len(result[0].Cookies) != 0 {
+		t.Error("expected empty cookies map")
 	}
 }
 
