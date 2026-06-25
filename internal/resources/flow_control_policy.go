@@ -55,27 +55,8 @@ type FlowControlPolicyResourceModel struct {
 	Tags        types.List             `tfsdk:"tags"`
 	Include     types.List             `tfsdk:"include"`
 	Exclude     types.List             `tfsdk:"exclude"`
-	Key         []FlowControlKeyModel  `tfsdk:"key"`
-	Steps       []FlowControlStepModel `tfsdk:"steps"`
-}
-
-// FlowControlKeyModel describes the data model for a flow control key entry
-type FlowControlKeyModel struct {
-	Attrs   types.String `tfsdk:"attrs"`
-	Args    types.String `tfsdk:"args"`
-	Plugins types.String `tfsdk:"plugins"`
-	Cookies types.String `tfsdk:"cookies"`
-	Headers types.String `tfsdk:"headers"`
-}
-
-// FlowControlStepModel describes the data model for a single flow step
-type FlowControlStepModel struct {
-	Method  types.String `tfsdk:"method"`
-	URI     types.String `tfsdk:"uri"`
-	Headers types.Map    `tfsdk:"headers"`
-	Cookies types.Map    `tfsdk:"cookies"`
-	Args    types.Map    `tfsdk:"args"`
-	Plugins types.Map    `tfsdk:"plugins"`
+	Key         []providerutil.FlowControlKeyModel  `tfsdk:"key"`
+	Steps       []providerutil.FlowControlStepModel `tfsdk:"steps"`
 }
 
 // NewFlowControlPolicyResource returns a new instance of the flow control policy resource
@@ -306,10 +287,10 @@ func (r *FlowControlPolicyResource) Read(ctx context.Context, req resource.ReadR
 	state.Exclude = excludeList
 
 	// Key
-	state.Key = parseFlowControlKeys(policy.Key)
+	state.Key = providerutil.ParseFlowControlKeys(policy.Key)
 
 	// Steps
-	state.Steps = parseFlowControlSteps(ctx, policy.Steps, &resp.Diagnostics)
+	state.Steps = providerutil.ParseFlowControlSteps(ctx, policy.Steps, &resp.Diagnostics)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -460,9 +441,9 @@ func buildFlowControlPolicyAPIModel(ctx context.Context, plan *FlowControlPolicy
 	return policy, diags
 }
 
-// buildFlowControlKeys converts []FlowControlKeyModel to []client.FlowControlKeyEntry for the API.
+// buildFlowControlKeys converts []providerutil.FlowControlKeyModel to []client.FlowControlKeyEntry for the API.
 // Exactly one field per entry is populated.
-func buildFlowControlKeys(keys []FlowControlKeyModel) []client.FlowControlKeyEntry {
+func buildFlowControlKeys(keys []providerutil.FlowControlKeyModel) []client.FlowControlKeyEntry {
 	result := make([]client.FlowControlKeyEntry, 0, len(keys))
 	for _, k := range keys {
 		var entry client.FlowControlKeyEntry
@@ -488,38 +469,12 @@ func buildFlowControlKeys(keys []FlowControlKeyModel) []client.FlowControlKeyEnt
 	return result
 }
 
-// parseFlowControlKeys converts []client.FlowControlKeyEntry to []FlowControlKeyModel.
-func parseFlowControlKeys(keys []client.FlowControlKeyEntry) []FlowControlKeyModel {
-	result := make([]FlowControlKeyModel, 0, len(keys))
-	for _, k := range keys {
-		km := FlowControlKeyModel{
-			Attrs:   types.StringNull(),
-			Args:    types.StringNull(),
-			Plugins: types.StringNull(),
-			Cookies: types.StringNull(),
-			Headers: types.StringNull(),
-		}
-		switch {
-		case k.Attrs != nil:
-			km.Attrs = types.StringValue(*k.Attrs)
-		case k.Args != nil:
-			km.Args = types.StringValue(*k.Args)
-		case k.Plugins != nil:
-			km.Plugins = types.StringValue(*k.Plugins)
-		case k.Cookies != nil:
-			km.Cookies = types.StringValue(*k.Cookies)
-		case k.Headers != nil:
-			km.Headers = types.StringValue(*k.Headers)
-		}
-		result = append(result, km)
-	}
-	return result
-}
-
-// buildFlowControlSteps converts []FlowControlStepModel to []client.FlowStepItem for the API.
-func buildFlowControlSteps(ctx context.Context, steps []FlowControlStepModel, diags *diag.Diagnostics) []client.FlowStepItem {
+// buildFlowControlSteps converts []providerutil.FlowControlStepModel to []client.FlowStepItem for the API.
+func buildFlowControlSteps(ctx context.Context, steps []providerutil.FlowControlStepModel, diags *diag.Diagnostics) []client.FlowStepItem {
 	result := make([]client.FlowStepItem, 0, len(steps))
 	for _, s := range steps {
+		// These 3 maps must be pre-initialized to empty maps, otherwise
+		// UI will not display them correctly when they are empty.
 		item := client.FlowStepItem{
 			Method:  s.Method.ValueString(),
 			URI:     s.URI.ValueString(),
@@ -552,39 +507,4 @@ func buildFlowControlSteps(ctx context.Context, steps []FlowControlStepModel, di
 	return result
 }
 
-// parseFlowControlSteps converts []client.FlowStepItem to []FlowControlStepModel.
-func parseFlowControlSteps(ctx context.Context, steps []client.FlowStepItem, diags *diag.Diagnostics) []FlowControlStepModel {
-	result := make([]FlowControlStepModel, 0, len(steps))
-	for _, s := range steps {
-		sm := FlowControlStepModel{
-			Method:  types.StringValue(s.Method),
-			URI:     types.StringValue(s.URI),
-			Headers: types.MapNull(types.StringType),
-			Cookies: types.MapNull(types.StringType),
-			Args:    types.MapNull(types.StringType),
-			Plugins: types.MapNull(types.StringType),
-		}
-		if len(s.Headers) > 0 {
-			m, d := types.MapValueFrom(ctx, types.StringType, s.Headers)
-			diags.Append(d...)
-			sm.Headers = m
-		}
-		if len(s.Cookies) > 0 {
-			m, d := types.MapValueFrom(ctx, types.StringType, s.Cookies)
-			diags.Append(d...)
-			sm.Cookies = m
-		}
-		if len(s.Args) > 0 {
-			m, d := types.MapValueFrom(ctx, types.StringType, s.Args)
-			diags.Append(d...)
-			sm.Args = m
-		}
-		if len(s.Plugins) > 0 {
-			m, d := types.MapValueFrom(ctx, types.StringType, s.Plugins)
-			diags.Append(d...)
-			sm.Plugins = m
-		}
-		result = append(result, sm)
-	}
-	return result
-}
+

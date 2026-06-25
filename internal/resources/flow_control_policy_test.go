@@ -11,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
+	"github.com/link11/terraform-provider-link11waap/internal/providerutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -87,7 +88,7 @@ func TestFlowControlPolicyResource_ImportState_TooManyParts(t *testing.T) {
 }
 
 func TestBuildFlowControlKeys_AllKeyTypes(t *testing.T) {
-	keys := []FlowControlKeyModel{
+	keys := []providerutil.FlowControlKeyModel{
 		{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		{Attrs: types.StringNull(), Args: types.StringValue("q"), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		{Attrs: types.StringNull(), Args: types.StringNull(), Plugins: types.StringValue("p"), Cookies: types.StringNull(), Headers: types.StringNull()},
@@ -126,7 +127,7 @@ func TestParseFlowControlKeys_AllKeyTypes(t *testing.T) {
 		{Cookies: strPtr("sid")},
 		{Headers: strPtr("x-key")},
 	}
-	result := parseFlowControlKeys(entries)
+	result := providerutil.ParseFlowControlKeys(entries)
 	if len(result) != 5 {
 		t.Fatalf("expected 5 models, got %d", len(result))
 	}
@@ -155,7 +156,7 @@ func TestFlowControlKeys_RoundTrip(t *testing.T) {
 		{Attrs: strPtr("ip")},
 		{Cookies: strPtr("sid")},
 	}
-	parsed := parseFlowControlKeys(entries)
+	parsed := providerutil.ParseFlowControlKeys(entries)
 	built := buildFlowControlKeys(parsed)
 	if len(built) != 2 {
 		t.Fatalf("expected 2, got %d", len(built))
@@ -171,7 +172,7 @@ func TestFlowControlKeys_RoundTrip(t *testing.T) {
 func TestBuildFlowControlSteps(t *testing.T) {
 	ctx := context.Background()
 	headers, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{"X-Test": "1"})
-	steps := []FlowControlStepModel{
+	steps := []providerutil.FlowControlStepModel{
 		{
 			Method:  types.StringValue("GET"),
 			URI:     types.StringValue("/login"),
@@ -209,7 +210,7 @@ func TestParseFlowControlSteps(t *testing.T) {
 		{Method: "POST", URI: "/checkout", Args: map[string]string{"step": "2"}},
 	}
 	var diags diag.Diagnostics
-	result := parseFlowControlSteps(ctx, steps, &diags)
+	result := providerutil.ParseFlowControlSteps(ctx, steps, &diags)
 	if diags.HasError() {
 		t.Fatalf("unexpected diags: %v", diags)
 	}
@@ -261,10 +262,10 @@ func TestBuildFlowControlPolicyAPIModel_BasicFields(t *testing.T) {
 		Tags:        tags,
 		Include:     include,
 		Exclude:     types.ListNull(types.StringType),
-		Key: []FlowControlKeyModel{
+		Key: []providerutil.FlowControlKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		},
-		Steps: []FlowControlStepModel{
+		Steps: []providerutil.FlowControlStepModel{
 			{Method: types.StringValue("GET"), URI: types.StringValue("/a"), Headers: types.MapNull(types.StringType), Cookies: types.MapNull(types.StringType), Args: types.MapNull(types.StringType), Plugins: types.MapNull(types.StringType)},
 		},
 		ConfigID: types.StringValue("cfg1"),
@@ -307,8 +308,8 @@ func TestBuildFlowControlPolicyAPIModel_NonNullExclude(t *testing.T) {
 		Tags:        types.ListNull(types.StringType),
 		Include:     types.ListNull(types.StringType),
 		Exclude:     exclude,
-		Key:         []FlowControlKeyModel{},
-		Steps:       []FlowControlStepModel{},
+		Key:         []providerutil.FlowControlKeyModel{},
+		Steps:       []providerutil.FlowControlStepModel{},
 		ConfigID:    types.StringValue("cfg1"),
 	}
 
@@ -327,7 +328,7 @@ func TestBuildFlowControlSteps_AllMaps(t *testing.T) {
 	args, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{"step": "2"})
 	plugins, _ := types.MapValueFrom(ctx, types.StringType, map[string]string{"key": "val"})
 
-	steps := []FlowControlStepModel{
+	steps := []providerutil.FlowControlStepModel{
 		{
 			Method:  types.StringValue("POST"),
 			URI:     types.StringValue("/submit"),
@@ -369,7 +370,7 @@ func TestParseFlowControlSteps_AllMaps(t *testing.T) {
 		},
 	}
 	var diags diag.Diagnostics
-	result := parseFlowControlSteps(ctx, steps, &diags)
+	result := providerutil.ParseFlowControlSteps(ctx, steps, &diags)
 	if diags.HasError() {
 		t.Fatalf("unexpected diags: %v", diags)
 	}
