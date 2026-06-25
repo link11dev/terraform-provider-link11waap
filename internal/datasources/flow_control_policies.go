@@ -25,14 +25,14 @@ type FlowControlPoliciesDataSourceModel struct {
 
 // FlowControlPolicyDataModel describes the data model for a single flow control policy
 type FlowControlPolicyDataModel struct {
-	ID          types.String               `tfsdk:"id"`
-	Name        types.String               `tfsdk:"name"`
-	Description types.String               `tfsdk:"description"`
-	Active      types.Bool                 `tfsdk:"active"`
-	Timeframe   types.Int64                `tfsdk:"timeframe"`
-	Tags        types.List                 `tfsdk:"tags"`
-	Include     types.List                 `tfsdk:"include"`
-	Exclude     types.List                 `tfsdk:"exclude"`
+	ID          types.String                        `tfsdk:"id"`
+	Name        types.String                        `tfsdk:"name"`
+	Description types.String                        `tfsdk:"description"`
+	Active      types.Bool                          `tfsdk:"active"`
+	Timeframe   types.Int64                         `tfsdk:"timeframe"`
+	Tags        types.List                          `tfsdk:"tags"`
+	Include     types.List                          `tfsdk:"include"`
+	Exclude     types.List                          `tfsdk:"exclude"`
 	Key         []providerutil.FlowControlKeyModel  `tfsdk:"key"`
 	Steps       []providerutil.FlowControlStepModel `tfsdk:"steps"`
 }
@@ -164,4 +164,3 @@ func (d *FlowControlPoliciesDataSource) Read(ctx context.Context, req datasource
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
 }
-

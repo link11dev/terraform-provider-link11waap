@@ -46,15 +46,15 @@ type FlowControlPolicyResource struct {
 
 // FlowControlPolicyResourceModel describes the resource model for a flow control policy
 type FlowControlPolicyResourceModel struct {
-	ConfigID    types.String           `tfsdk:"config_id"`
-	ID          types.String           `tfsdk:"id"`
-	Name        types.String           `tfsdk:"name"`
-	Description types.String           `tfsdk:"description"`
-	Active      types.Bool             `tfsdk:"active"`
-	Timeframe   types.Int64            `tfsdk:"timeframe"`
-	Tags        types.List             `tfsdk:"tags"`
-	Include     types.List             `tfsdk:"include"`
-	Exclude     types.List             `tfsdk:"exclude"`
+	ConfigID    types.String                        `tfsdk:"config_id"`
+	ID          types.String                        `tfsdk:"id"`
+	Name        types.String                        `tfsdk:"name"`
+	Description types.String                        `tfsdk:"description"`
+	Active      types.Bool                          `tfsdk:"active"`
+	Timeframe   types.Int64                         `tfsdk:"timeframe"`
+	Tags        types.List                          `tfsdk:"tags"`
+	Include     types.List                          `tfsdk:"include"`
+	Exclude     types.List                          `tfsdk:"exclude"`
 	Key         []providerutil.FlowControlKeyModel  `tfsdk:"key"`
 	Steps       []providerutil.FlowControlStepModel `tfsdk:"steps"`
 }
@@ -506,5 +506,3 @@ func buildFlowControlSteps(ctx context.Context, steps []providerutil.FlowControl
 	}
 	return result
 }
-
-
