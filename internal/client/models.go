@@ -272,6 +272,23 @@ type RateLimitTagFilter struct {
 	Tags     []string `json:"tags"`
 }
 
+// DynamicRule represents a dynamic rule in the API
+type DynamicRule struct {
+	ID                 string             `json:"id"`
+	Name               string             `json:"name"`
+	Description        string             `json:"description,omitempty"`
+	Threshold          int                `json:"threshold"`
+	Timeframe          int                `json:"timeframe"`
+	TTL                int                `json:"ttl"`
+	Active             bool               `json:"active"`
+	OffloadIPFiltering bool               `json:"offload_ip_filtering"`
+	Target             string             `json:"target"`
+	Action             string             `json:"action"`
+	Tags               []string           `json:"tags,omitempty"`
+	Include            RateLimitTagFilter `json:"include"`
+	Exclude            RateLimitTagFilter `json:"exclude"`
+}
+
 // FlowControl represents a flow control policy in the API
 type FlowControl struct {
 	ID          string                `json:"id"`

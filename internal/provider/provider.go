@@ -136,6 +136,7 @@ func (p *Link11WaapProvider) Resources(_ context.Context) []func() resource.Reso
 		resources.NewContentFilterRuleResource,
 		resources.NewActionResource,
 		resources.NewContentFilterProfileResource,
+		resources.NewDynamicRuleResource,
 	}
 }
 
@@ -163,5 +164,6 @@ func (p *Link11WaapProvider) DataSources(_ context.Context) []func() datasource.
 		datasources.NewContentFilterRulesDataSource,
 		datasources.NewActionsDataSource,
 		datasources.NewContentFilterProfilesDataSource,
+		datasources.NewDynamicRulesDataSource,
 	}
 }
