@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -87,7 +89,7 @@ func TestKnownRegions_Contains_ExpectedRegions(t *testing.T) {
 	assert.Equal(t, expected, knownRegions)
 }
 
-func TestRegionsSchemaAttribute_HasOneEntryPerKnownRegionWithDefaults(t *testing.T) {
+func TestRegionsSchemaAttribute_IsMapWithKeyAndValueValidators(t *testing.T) {
 	r := &LoadBalancerRegionsResource{}
 	ctx := context.Background()
 
@@ -95,49 +97,78 @@ func TestRegionsSchemaAttribute_HasOneEntryPerKnownRegionWithDefaults(t *testing
 	resp := schemaResp()
 	r.Schema(ctx, req, resp)
 
-	regionsAttr, ok := resp.Schema.Attributes["regions"].(schema.SingleNestedAttribute)
-	require.True(t, ok, "expected regions to be a SingleNestedAttribute")
-	require.Len(t, regionsAttr.Attributes, len(knownRegions))
-
-	for _, region := range knownRegions {
-		sub, ok := regionsAttr.Attributes[region].(schema.StringAttribute)
-		require.True(t, ok, "expected region %q to be a StringAttribute", region)
-		assert.True(t, sub.Optional, "region %q should be optional", region)
-		assert.True(t, sub.Computed, "region %q should be computed", region)
-		require.NotNil(t, sub.Default, "region %q should have a default", region)
-	}
-
-	// Unknown city codes must not be accepted as valid attributes.
-	_, ok = regionsAttr.Attributes["sfo"]
-	assert.False(t, ok, "unexpected region attribute for unknown city code")
+	regionsAttr, ok := resp.Schema.Attributes["regions"].(schema.MapAttribute)
+	require.True(t, ok, "expected regions to be a MapAttribute")
+	assert.True(t, regionsAttr.Optional, "regions should be optional")
+	assert.False(t, regionsAttr.Computed, "regions should not be computed")
+	assert.Equal(t, types.StringType, regionsAttr.ElementType)
+	assert.NotEmpty(t, regionsAttr.Validators, "regions should have validators to reject unknown city codes")
 }
 
-func TestRegionsObjectToMap(t *testing.T) {
-	values := make(map[string]attr.Value, len(knownRegions))
-	for _, region := range knownRegions {
-		values[region] = types.StringValue("custom-" + region)
-	}
-	obj, diags := types.ObjectValue(regionAttributeTypes(), values)
+// TestRegionsSchemaAttribute_RejectsUnknownCityCode is a regression test
+// for a bug where a typo'd city code (e.g. "lon111" instead of "lon") was
+// silently dropped instead of producing a validation error. This exercises
+// the schema's Map validators the same way Terraform Core's
+// ValidateResourceConfig RPC would.
+func TestRegionsSchemaAttribute_RejectsUnknownCityCode(t *testing.T) {
+	r := &LoadBalancerRegionsResource{}
+	ctx := context.Background()
+
+	req := schemaReq()
+	resp := schemaResp()
+	r.Schema(ctx, req, resp)
+
+	regionsAttr, ok := resp.Schema.Attributes["regions"].(schema.MapAttribute)
+	require.True(t, ok, "expected regions to be a MapAttribute")
+
+	configValue, diags := types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"ams":    "ffm",
+		"lon111": "automatic",
+	})
 	require.False(t, diags.HasError())
 
-	result := regionsObjectToMap(obj)
-	require.Len(t, result, len(knownRegions))
-	for _, region := range knownRegions {
-		assert.Equal(t, "custom-"+region, result[region])
+	var respDiags diag.Diagnostics
+	for _, v := range regionsAttr.Validators {
+		validateResp := &validator.MapResponse{}
+		v.ValidateMap(ctx, validator.MapRequest{
+			Path:        path.Root("regions"),
+			ConfigValue: configValue,
+		}, validateResp)
+		respDiags.Append(validateResp.Diagnostics...)
 	}
+
+	assert.True(t, respDiags.HasError(), "expected an error for the unknown city code %q", "lon111")
 }
 
-func TestRegionsMapToObject_FillsMissingRegionsWithAutomatic(t *testing.T) {
-	// Only provide two regions from the "API".
-	apiRegions := map[string]string{
+func TestRegionsMapToStringMap(t *testing.T) {
+	ctx := context.Background()
+
+	m, diags := types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"ams": "ffm",
+		"lon": "automatic",
+	})
+	require.False(t, diags.HasError())
+
+	result, diags := regionsMapToStringMap(ctx, m)
+	require.False(t, diags.HasError())
+	assert.Equal(t, map[string]string{"ams": "ffm", "lon": "automatic"}, result)
+}
+
+func TestRegionsMapToStringMap_NullReturnsEmptyMap(t *testing.T) {
+	ctx := context.Background()
+
+	result, diags := regionsMapToStringMap(ctx, types.MapNull(types.StringType))
+	require.False(t, diags.HasError())
+	assert.Empty(t, result)
+}
+
+func TestFullRegionsMap_FillsMissingRegionsWithAutomatic(t *testing.T) {
+	configured := map[string]string{
 		"ams": "ffm",
 		"ffm": "custom",
 	}
 
-	obj, diags := regionsMapToObject(apiRegions)
-	require.False(t, diags.HasError())
-
-	result := regionsObjectToMap(obj)
+	result := fullRegionsMap(configured)
 	require.Len(t, result, len(knownRegions))
 	assert.Equal(t, "ffm", result["ams"])
 	assert.Equal(t, "custom", result["ffm"])
@@ -149,12 +180,33 @@ func TestRegionsMapToObject_FillsMissingRegionsWithAutomatic(t *testing.T) {
 	}
 }
 
-func TestDefaultRegionsObject_AllRegionsAutomatic(t *testing.T) {
-	obj := defaultRegionsObject()
+func TestRefreshTrackedRegions_OnlyKeepsPreviouslyTrackedKeys(t *testing.T) {
+	ctx := context.Background()
 
-	result := regionsObjectToMap(obj)
-	require.Len(t, result, len(knownRegions))
-	for _, region := range knownRegions {
-		assert.Equal(t, automaticRegionValue, result[region])
+	prior, diags := types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"ams": "automatic",
+	})
+	require.False(t, diags.HasError())
+
+	apiRegions := map[string]string{
+		"ams": "ffm",
+		"lon": "automatic",
 	}
+
+	refreshed, diags := refreshTrackedRegions(ctx, prior, apiRegions)
+	require.False(t, diags.HasError())
+
+	var result map[string]string
+	diags = refreshed.ElementsAs(ctx, &result, false)
+	require.False(t, diags.HasError())
+
+	assert.Equal(t, map[string]string{"ams": "ffm"}, result)
+}
+
+func TestRefreshTrackedRegions_NullPassesThrough(t *testing.T) {
+	ctx := context.Background()
+
+	refreshed, diags := refreshTrackedRegions(ctx, types.MapNull(types.StringType), map[string]string{"ams": "ffm"})
+	require.False(t, diags.HasError())
+	assert.True(t, refreshed.IsNull())
 }
