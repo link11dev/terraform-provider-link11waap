@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework-validators/mapvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 	"github.com/link11/terraform-provider-link11waap/internal/providerutil"
@@ -25,50 +28,66 @@ var (
 // knownRegions is the list of all known load balancer region codes.
 var knownRegions = []string{"ams", "ash", "ffm", "hkg", "lax", "lon", "nyc", "sgp", "stl"}
 
-// allRegionsDefaultModifier is a plan modifier that fills in missing region keys
-// with "automatic" as the default value, so that user configs specifying a subset
-// of regions do not produce perpetual diffs against the full API response.
-type allRegionsDefaultModifier struct{}
+// automaticRegionValue is the default value applied to any region not
+// explicitly set by the user.
+const automaticRegionValue = "automatic"
 
-// Description returns a human-readable description of the plan modifier.
-func (m allRegionsDefaultModifier) Description(_ context.Context) string {
-	return "Fills in missing region keys with the default value 'automatic'."
+// validRegionValues returns the set of values a region entry may be set to:
+// "automatic" or a redirect to another known city code.
+func validRegionValues() []string {
+	values := make([]string, 0, len(knownRegions)+1)
+	values = append(values, automaticRegionValue)
+	values = append(values, knownRegions...)
+	return values
 }
 
-// MarkdownDescription returns a markdown description of the plan modifier.
-func (m allRegionsDefaultModifier) MarkdownDescription(_ context.Context) string {
-	return "Fills in missing region keys with the default value `automatic`."
+// regionsMapToStringMap converts the configured regions map attribute into
+// a plain Go map for sending to the API. Returns an empty map if the
+// attribute is null or unknown.
+func regionsMapToStringMap(ctx context.Context, m types.Map) (map[string]string, diag.Diagnostics) {
+	result := make(map[string]string, len(knownRegions))
+	if m.IsNull() || m.IsUnknown() {
+		return result, nil
+	}
+	diags := m.ElementsAs(ctx, &result, false)
+	return result, diags
 }
 
-// PlanModifyMap implements the plan modification logic for the regions map.
-func (m allRegionsDefaultModifier) PlanModifyMap(_ context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	// If the plan value is null or unknown, do nothing.
-	if req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
-		return
-	}
-
-	elements := req.PlanValue.Elements()
-	newElements := make(map[string]attr.Value, len(knownRegions))
-
-	// Copy existing plan values.
-	for k, v := range elements {
-		newElements[k] = v
-	}
-
-	// Fill in missing known regions with "automatic".
+// fullRegionsMap returns a copy of configured with every known region
+// present, defaulting any region not explicitly configured to "automatic".
+// This gives the resource exclusive ownership of all known regions on the
+// API side, even though Terraform state only tracks the keys the user
+// configured (see refreshTrackedRegions).
+func fullRegionsMap(configured map[string]string) map[string]string {
+	result := make(map[string]string, len(knownRegions))
 	for _, region := range knownRegions {
-		if _, exists := newElements[region]; !exists {
-			newElements[region] = types.StringValue("automatic")
+		if v, ok := configured[region]; ok {
+			result[region] = v
+		} else {
+			result[region] = automaticRegionValue
 		}
 	}
+	return result
+}
 
-	newMap, diags := types.MapValue(types.StringType, newElements)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+// refreshTrackedRegions rebuilds the regions map value using only the keys
+// already tracked in priorRegions, refreshed with their current values from
+// the API. Keys the user never configured are intentionally left out of
+// state so that regions outside the user's config don't produce a
+// perpetual diff.
+func refreshTrackedRegions(ctx context.Context, priorRegions types.Map, apiRegions map[string]string) (types.Map, diag.Diagnostics) {
+	if priorRegions.IsNull() || priorRegions.IsUnknown() {
+		return priorRegions, nil
 	}
-
-	resp.PlanValue = newMap
+	tracked := make(map[string]string, len(priorRegions.Elements()))
+	for region := range priorRegions.Elements() {
+		if v, ok := apiRegions[region]; ok {
+			tracked[region] = v
+		} else {
+			tracked[region] = automaticRegionValue
+		}
+	}
+	return types.MapValueFrom(ctx, types.StringType, tracked)
 }
 
 // LoadBalancerRegionsResource implements the load balancer regions resource.
@@ -113,12 +132,15 @@ func (r *LoadBalancerRegionsResource) Schema(_ context.Context, _ resource.Schem
 				Required:    true,
 			},
 			"regions": schema.MapAttribute{
-				Description: "Map of city codes to region values. Missing keys default to 'automatic'.",
+				Description: fmt.Sprintf(
+					"Region values keyed by city code (%s). Any region not explicitly set defaults to %q on the API side, but only the keys you configure here are tracked in state.",
+					strings.Join(knownRegions, ", "), automaticRegionValue,
+				),
 				Optional:    true,
-				Computed:    true,
 				ElementType: types.StringType,
-				PlanModifiers: []planmodifier.Map{
-					allRegionsDefaultModifier{},
+				Validators: []validator.Map{
+					mapvalidator.KeysAre(stringvalidator.OneOf(knownRegions...)),
+					mapvalidator.ValueStringsAre(stringvalidator.OneOf(validRegionValues()...)),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -153,9 +175,8 @@ func (r *LoadBalancerRegionsResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	// Convert regions map
-	var regionsMap map[string]string
-	resp.Diagnostics.Append(plan.Regions.ElementsAs(ctx, &regionsMap, false)...)
+	configuredRegions, diags := regionsMapToStringMap(ctx, plan.Regions)
+	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -164,7 +185,7 @@ func (r *LoadBalancerRegionsResource) Create(ctx context.Context, req resource.C
 		LBs: []client.LoadBalancerRegionUpdate{
 			{
 				ID:      plan.LBID.ValueString(),
-				Regions: regionsMap,
+				Regions: fullRegionsMap(configuredRegions),
 			},
 		},
 	}
@@ -178,7 +199,9 @@ func (r *LoadBalancerRegionsResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	// Read back to get computed values
+	// Read back to get computed values. The regions attribute itself is
+	// left untouched: since it isn't Computed, its final state value must
+	// match the planned (configured) value exactly.
 	lbRegions, err := r.client.GetLoadBalancerRegions(ctx, plan.ConfigID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -226,12 +249,7 @@ func (r *LoadBalancerRegionsResource) Read(ctx context.Context, req resource.Rea
 			found = true
 			state.Name = types.StringValue(lb.Name)
 
-			// Convert regions map
-			regionsMapValues := make(map[string]attr.Value)
-			for k, v := range lb.Regions {
-				regionsMapValues[k] = types.StringValue(v)
-			}
-			regionsMap, diags := types.MapValue(types.StringType, regionsMapValues)
+			regionsMap, diags := refreshTrackedRegions(ctx, state.Regions, lb.Regions)
 			resp.Diagnostics.Append(diags...)
 			state.Regions = regionsMap
 
@@ -258,9 +276,8 @@ func (r *LoadBalancerRegionsResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	// Convert regions map
-	var regionsMap map[string]string
-	resp.Diagnostics.Append(plan.Regions.ElementsAs(ctx, &regionsMap, false)...)
+	configuredRegions, diags := regionsMapToStringMap(ctx, plan.Regions)
+	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -269,7 +286,7 @@ func (r *LoadBalancerRegionsResource) Update(ctx context.Context, req resource.U
 		LBs: []client.LoadBalancerRegionUpdate{
 			{
 				ID:      plan.LBID.ValueString(),
-				Regions: regionsMap,
+				Regions: fullRegionsMap(configuredRegions),
 			},
 		},
 	}
@@ -283,7 +300,9 @@ func (r *LoadBalancerRegionsResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	// Read back to get computed values
+	// Read back to get computed values. The regions attribute itself is
+	// left untouched: since it isn't Computed, its final state value must
+	// match the planned (configured) value exactly.
 	lbRegions, err := r.client.GetLoadBalancerRegions(ctx, plan.ConfigID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(

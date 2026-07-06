@@ -532,7 +532,7 @@ func TestLoadBalancerRegionsResource_CRUD_WithFailingClient(t *testing.T) {
 	vals := map[string]tftypes.Value{
 		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
 		"lb_id":     tftypes.NewValue(tftypes.String, "lb1"),
-		"regions":   tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{"ams": tftypes.NewValue(tftypes.String, "automatic")}),
+		"regions":   regionsMapTFValue(map[string]string{"ams": "automatic"}),
 	}
 
 	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, vals) })

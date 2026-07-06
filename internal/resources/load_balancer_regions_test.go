@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,127 +84,129 @@ func TestLoadBalancerRegionsResource_ImportState_TooManyParts(t *testing.T) {
 	assert.True(t, resp.Diagnostics.HasError())
 }
 
-func TestAllRegionsDefaultModifier_Description(t *testing.T) {
-	m := allRegionsDefaultModifier{}
-	ctx := context.Background()
-
-	desc := m.Description(ctx)
-	assert.Contains(t, desc, "automatic")
-
-	mdDesc := m.MarkdownDescription(ctx)
-	assert.Contains(t, mdDesc, "automatic")
+func TestKnownRegions_Contains_ExpectedRegions(t *testing.T) {
+	expected := []string{"ams", "ash", "ffm", "hkg", "lax", "lon", "nyc", "sgp", "stl"}
+	assert.Equal(t, expected, knownRegions)
 }
 
-func TestAllRegionsDefaultModifier_PlanModifyMap_NullValue(t *testing.T) {
-	m := allRegionsDefaultModifier{}
+func TestRegionsSchemaAttribute_IsMapWithKeyAndValueValidators(t *testing.T) {
+	r := &LoadBalancerRegionsResource{}
 	ctx := context.Background()
 
-	req := planmodifier.MapRequest{
-		PlanValue: types.MapNull(types.StringType),
-	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
-	}
+	req := schemaReq()
+	resp := schemaResp()
+	r.Schema(ctx, req, resp)
 
-	m.PlanModifyMap(ctx, req, resp)
-
-	// Should not modify null values
-	assert.True(t, resp.PlanValue.IsNull())
-	assert.False(t, resp.Diagnostics.HasError())
+	regionsAttr, ok := resp.Schema.Attributes["regions"].(schema.MapAttribute)
+	require.True(t, ok, "expected regions to be a MapAttribute")
+	assert.True(t, regionsAttr.Optional, "regions should be optional")
+	assert.False(t, regionsAttr.Computed, "regions should not be computed")
+	assert.Equal(t, types.StringType, regionsAttr.ElementType)
+	assert.NotEmpty(t, regionsAttr.Validators, "regions should have validators to reject unknown city codes")
 }
 
-func TestAllRegionsDefaultModifier_PlanModifyMap_UnknownValue(t *testing.T) {
-	m := allRegionsDefaultModifier{}
+// TestRegionsSchemaAttribute_RejectsUnknownCityCode is a regression test
+// for a bug where a typo'd city code (e.g. "lon111" instead of "lon") was
+// silently dropped instead of producing a validation error. This exercises
+// the schema's Map validators the same way Terraform Core's
+// ValidateResourceConfig RPC would.
+func TestRegionsSchemaAttribute_RejectsUnknownCityCode(t *testing.T) {
+	r := &LoadBalancerRegionsResource{}
 	ctx := context.Background()
 
-	req := planmodifier.MapRequest{
-		PlanValue: types.MapUnknown(types.StringType),
-	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
-	}
+	req := schemaReq()
+	resp := schemaResp()
+	r.Schema(ctx, req, resp)
 
-	m.PlanModifyMap(ctx, req, resp)
+	regionsAttr, ok := resp.Schema.Attributes["regions"].(schema.MapAttribute)
+	require.True(t, ok, "expected regions to be a MapAttribute")
 
-	// Should not modify unknown values
-	assert.True(t, resp.PlanValue.IsUnknown())
-	assert.False(t, resp.Diagnostics.HasError())
-}
-
-func TestAllRegionsDefaultModifier_PlanModifyMap_FillsMissingRegions(t *testing.T) {
-	m := allRegionsDefaultModifier{}
-	ctx := context.Background()
-
-	// Only provide two regions
-	planMap, diags := types.MapValue(types.StringType, map[string]attr.Value{
-		"ams": types.StringValue("us-east-1"),
-		"ffm": types.StringValue("eu-central-1"),
+	configValue, diags := types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"ams":    "ffm",
+		"lon111": "automatic",
 	})
 	require.False(t, diags.HasError())
 
-	req := planmodifier.MapRequest{
-		PlanValue: planMap,
+	var respDiags diag.Diagnostics
+	for _, v := range regionsAttr.Validators {
+		validateResp := &validator.MapResponse{}
+		v.ValidateMap(ctx, validator.MapRequest{
+			Path:        path.Root("regions"),
+			ConfigValue: configValue,
+		}, validateResp)
+		respDiags.Append(validateResp.Diagnostics...)
 	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
+
+	assert.True(t, respDiags.HasError(), "expected an error for the unknown city code %q", "lon111")
+}
+
+func TestRegionsMapToStringMap(t *testing.T) {
+	ctx := context.Background()
+
+	m, diags := types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"ams": "ffm",
+		"lon": "automatic",
+	})
+	require.False(t, diags.HasError())
+
+	result, diags := regionsMapToStringMap(ctx, m)
+	require.False(t, diags.HasError())
+	assert.Equal(t, map[string]string{"ams": "ffm", "lon": "automatic"}, result)
+}
+
+func TestRegionsMapToStringMap_NullReturnsEmptyMap(t *testing.T) {
+	ctx := context.Background()
+
+	result, diags := regionsMapToStringMap(ctx, types.MapNull(types.StringType))
+	require.False(t, diags.HasError())
+	assert.Empty(t, result)
+}
+
+func TestFullRegionsMap_FillsMissingRegionsWithAutomatic(t *testing.T) {
+	configured := map[string]string{
+		"ams": "ffm",
+		"ffm": "custom",
 	}
 
-	m.PlanModifyMap(ctx, req, resp)
+	result := fullRegionsMap(configured)
+	require.Len(t, result, len(knownRegions))
+	assert.Equal(t, "ffm", result["ams"])
+	assert.Equal(t, "custom", result["ffm"])
 
-	assert.False(t, resp.Diagnostics.HasError())
-	assert.False(t, resp.PlanValue.IsNull())
-
-	var elements map[string]string
-	resp.PlanValue.ElementsAs(ctx, &elements, false)
-
-	// Should have all known regions
-	assert.Len(t, elements, len(knownRegions))
-
-	// Provided regions should be preserved
-	assert.Equal(t, "us-east-1", elements["ams"])
-	assert.Equal(t, "eu-central-1", elements["ffm"])
-
-	// Missing regions should be filled with "automatic"
 	for _, region := range knownRegions {
 		if region != "ams" && region != "ffm" {
-			assert.Equal(t, "automatic", elements[region], "region %q should be 'automatic'", region)
+			assert.Equal(t, automaticRegionValue, result[region], "region %q should default to automatic", region)
 		}
 	}
 }
 
-func TestAllRegionsDefaultModifier_PlanModifyMap_AllRegionsPresent(t *testing.T) {
-	m := allRegionsDefaultModifier{}
+func TestRefreshTrackedRegions_OnlyKeepsPreviouslyTrackedKeys(t *testing.T) {
 	ctx := context.Background()
 
-	// Provide all regions
-	values := make(map[string]attr.Value)
-	for _, region := range knownRegions {
-		values[region] = types.StringValue("custom-" + region)
-	}
-	planMap, diags := types.MapValue(types.StringType, values)
+	prior, diags := types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"ams": "automatic",
+	})
 	require.False(t, diags.HasError())
 
-	req := planmodifier.MapRequest{
-		PlanValue: planMap,
-	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
+	apiRegions := map[string]string{
+		"ams": "ffm",
+		"lon": "automatic",
 	}
 
-	m.PlanModifyMap(ctx, req, resp)
+	refreshed, diags := refreshTrackedRegions(ctx, prior, apiRegions)
+	require.False(t, diags.HasError())
 
-	assert.False(t, resp.Diagnostics.HasError())
+	var result map[string]string
+	diags = refreshed.ElementsAs(ctx, &result, false)
+	require.False(t, diags.HasError())
 
-	var elements map[string]string
-	resp.PlanValue.ElementsAs(ctx, &elements, false)
-
-	// All custom values should be preserved
-	for _, region := range knownRegions {
-		assert.Equal(t, "custom-"+region, elements[region])
-	}
+	assert.Equal(t, map[string]string{"ams": "ffm"}, result)
 }
 
-func TestKnownRegions_Contains_ExpectedRegions(t *testing.T) {
-	expected := []string{"ams", "ash", "ffm", "hkg", "lax", "lon", "nyc", "sgp", "stl"}
-	assert.Equal(t, expected, knownRegions)
+func TestRefreshTrackedRegions_NullPassesThrough(t *testing.T) {
+	ctx := context.Background()
+
+	refreshed, diags := refreshTrackedRegions(ctx, types.MapNull(types.StringType), map[string]string{"ams": "ffm"})
+	require.False(t, diags.HasError())
+	assert.True(t, refreshed.IsNull())
 }
