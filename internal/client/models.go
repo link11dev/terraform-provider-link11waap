@@ -272,6 +272,40 @@ type RateLimitTagFilter struct {
 	Tags     []string `json:"tags"`
 }
 
+// FlowControl represents a flow control policy in the API
+type FlowControl struct {
+	ID          string                `json:"id"`
+	Name        string                `json:"name"`
+	Description string                `json:"description,omitempty"`
+	Active      bool                  `json:"active"`
+	Timeframe   int                   `json:"timeframe"`
+	Tags        []string              `json:"tags,omitempty"`
+	Include     []string              `json:"include"`
+	Exclude     []string              `json:"exclude"`
+	Key         []FlowControlKeyEntry `json:"key"`
+	Steps       []FlowStepItem        `json:"steps"`
+}
+
+// FlowControlKeyEntry represents a single key entry of a flow control policy.
+// Exactly one field should be set per entry; unset fields are omitted.
+type FlowControlKeyEntry struct {
+	Attrs   *string `json:"attrs,omitempty"`
+	Args    *string `json:"args,omitempty"`
+	Cookies *string `json:"cookies,omitempty"`
+	Headers *string `json:"headers,omitempty"`
+	Plugins *string `json:"plugins,omitempty"`
+}
+
+// FlowStepItem represents a single ordered step of a restricted flow.
+type FlowStepItem struct {
+	Method  string            `json:"method"`
+	URI     string            `json:"uri"`
+	Headers map[string]string `json:"headers"`
+	Cookies map[string]string `json:"cookies"`
+	Args    map[string]string `json:"args"`
+	Plugins map[string]string `json:"plugins,omitempty"`
+}
+
 // User represents a user account in the API
 type User struct {
 	ID          string `json:"id"`

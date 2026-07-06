@@ -86,6 +86,27 @@ func TestLoadBalancersDataSource_Read_MultipleLBs(t *testing.T) {
 	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
 }
 
+func TestLoadBalancersDataSource_Read_EmptyList(t *testing.T) {
+	d := NewLoadBalancersDataSource()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(client.ListResponse[client.LoadBalancer]{
+			Total: 0,
+			Items: []client.LoadBalancer{},
+		})
+	})
+	configureDatasourceWithMock(t, d, handler)
+
+	resp := readDatasource(t, d, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+	})
+	require.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+
+	var state LoadBalancersDataSourceModel
+	resp.State.Get(context.Background(), &state)
+	assert.NotNil(t, state.LoadBalancers)
+	assert.Len(t, state.LoadBalancers, 0)
+}
+
 func TestLoadBalancersDataSource_Read_APIError(t *testing.T) {
 	d := NewLoadBalancersDataSource()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -2,3 +2,6 @@
 
 # tmp exclude due to empty interface
 internal/resources/rate_limit_rule.go
+
+# tmp fix for yaml.github-actions.security.github-actions-mutable-action-tag
+.github/workflows/

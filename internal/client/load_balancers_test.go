@@ -17,7 +17,18 @@ func TestListLoadBalancers_Success(t *testing.T) {
 		assert.Equal(t, "/conf/cfg1/load-balancers", r.URL.Path)
 		json.NewEncoder(w).Encode(ListResponse[LoadBalancer]{
 			Total: 1,
-			Items: []LoadBalancer{{Name: "lb1", Provider: "aws", Region: "us-east-1"}},
+			Items: []LoadBalancer{{
+				Name:               "lb1",
+				Provider:           "aws",
+				Region:             "us-east-1",
+				DNSName:            "lb1.example.com",
+				ListenerName:       "listener1",
+				ListenerPort:       443,
+				LoadBalancerType:   "application",
+				MaxCertificates:    25,
+				DefaultCertificate: "cert-default",
+				Certificates:       []string{"cert1", "cert2"},
+			}},
 		})
 	}))
 	defer server.Close()
@@ -26,7 +37,29 @@ func TestListLoadBalancers_Success(t *testing.T) {
 	lbs, err := c.ListLoadBalancers(context.Background(), "cfg1")
 	require.NoError(t, err)
 	require.Len(t, lbs, 1)
-	assert.Equal(t, "lb1", lbs[0].Name)
+	lb := lbs[0]
+	assert.Equal(t, "lb1", lb.Name)
+	assert.Equal(t, "aws", lb.Provider)
+	assert.Equal(t, "us-east-1", lb.Region)
+	assert.Equal(t, "lb1.example.com", lb.DNSName)
+	assert.Equal(t, "listener1", lb.ListenerName)
+	assert.Equal(t, 443, lb.ListenerPort)
+	assert.Equal(t, "application", lb.LoadBalancerType)
+	assert.Equal(t, 25, lb.MaxCertificates)
+	assert.Equal(t, "cert-default", lb.DefaultCertificate)
+	assert.Equal(t, []string{"cert1", "cert2"}, lb.Certificates)
+}
+
+func TestListLoadBalancers_Empty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"total":0,"items":[]}`))
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server)
+	lbs, err := c.ListLoadBalancers(context.Background(), "cfg1")
+	require.NoError(t, err)
+	assert.Empty(t, lbs)
 }
 
 func TestListLoadBalancers_Error(t *testing.T) {
