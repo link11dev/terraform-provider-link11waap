@@ -52,6 +52,21 @@ func TestListFlowControlPolicies_InvalidJSON(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestListFlowControlPolicies_TotalMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		json.NewEncoder(w).Encode(ListResponse[FlowControl]{
+			Total: 3,
+			Items: []FlowControl{{ID: "fc1", Name: "flow1", Timeframe: 60}},
+		})
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server)
+	_, err := c.ListFlowControlPolicies(context.Background(), "cfg1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server reported 3 flow control policies, but only 1 were returned")
+}
+
 func TestGetFlowControlPolicy_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/conf/cfg1/flow-control-policies/fc1", r.URL.Path)
