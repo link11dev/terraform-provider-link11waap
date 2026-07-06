@@ -593,12 +593,18 @@ func TestLoadBalancerRegionsResource_Read_WithMock(t *testing.T) {
 	resp := readWithMock(t, r, map[string]tftypes.Value{
 		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
 		"lb_id":     tftypes.NewValue(tftypes.String, "lb1"),
-		"regions": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{
-			"ams": tftypes.NewValue(tftypes.String, "automatic"),
-		}),
+		"regions":   regionsObjectTFValue(map[string]string{"ams": "automatic"}),
 	})
 
 	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+
+	var state LoadBalancerRegionsResourceModel
+	assert.False(t, resp.State.Get(context.Background(), &state).HasError())
+	result := regionsObjectToMap(state.Regions)
+	assert.Equal(t, "automatic", result["ams"])
+	assert.Equal(t, "manual", result["nyc"])
+	// Regions absent from the API response still default to "automatic".
+	assert.Equal(t, "automatic", result["ffm"])
 }
 
 func TestLoadBalancerRegionsResource_Read_LBNotFound(t *testing.T) {
@@ -615,9 +621,7 @@ func TestLoadBalancerRegionsResource_Read_LBNotFound(t *testing.T) {
 	resp := readWithMock(t, r, map[string]tftypes.Value{
 		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
 		"lb_id":     tftypes.NewValue(tftypes.String, "lb1"),
-		"regions": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{
-			"ams": tftypes.NewValue(tftypes.String, "automatic"),
-		}),
+		"regions":   regionsObjectTFValue(map[string]string{"ams": "automatic"}),
 	})
 
 	// LB not found in response - resource should be removed

@@ -6,11 +6,14 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
@@ -22,53 +25,83 @@ var (
 	_ resource.ResourceWithImportState = &LoadBalancerRegionsResource{}
 )
 
-// knownRegions is the list of all known load balancer region codes.
+// knownRegions is the list of all known load balancer region codes. Regions
+// is modeled as a nested object attribute (one named, typed attribute per
+// known code) rather than a free-form map so that: (1) unknown city codes
+// are rejected by Terraform Core itself as unsupported arguments, and (2)
+// each region can carry its own Optional+Computed default independently,
+// which a flat map attribute cannot do (Terraform Core requires a planned
+// map value to match the config value exactly once the config is non-null).
 var knownRegions = []string{"ams", "ash", "ffm", "hkg", "lax", "lon", "nyc", "sgp", "stl"}
 
-// allRegionsDefaultModifier is a plan modifier that fills in missing region keys
-// with "automatic" as the default value, so that user configs specifying a subset
-// of regions do not produce perpetual diffs against the full API response.
-type allRegionsDefaultModifier struct{}
+// automaticRegionValue is the default value applied to any region not
+// explicitly set by the user.
+const automaticRegionValue = "automatic"
 
-// Description returns a human-readable description of the plan modifier.
-func (m allRegionsDefaultModifier) Description(_ context.Context) string {
-	return "Fills in missing region keys with the default value 'automatic'."
-}
-
-// MarkdownDescription returns a markdown description of the plan modifier.
-func (m allRegionsDefaultModifier) MarkdownDescription(_ context.Context) string {
-	return "Fills in missing region keys with the default value `automatic`."
-}
-
-// PlanModifyMap implements the plan modification logic for the regions map.
-func (m allRegionsDefaultModifier) PlanModifyMap(_ context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	// If the plan value is null or unknown, do nothing.
-	if req.PlanValue.IsNull() || req.PlanValue.IsUnknown() {
-		return
-	}
-
-	elements := req.PlanValue.Elements()
-	newElements := make(map[string]attr.Value, len(knownRegions))
-
-	// Copy existing plan values.
-	for k, v := range elements {
-		newElements[k] = v
-	}
-
-	// Fill in missing known regions with "automatic".
+// regionAttributeTypes returns the attribute type map for the regions
+// nested object, one types.StringType entry per known region code.
+func regionAttributeTypes() map[string]attr.Type {
+	attrTypes := make(map[string]attr.Type, len(knownRegions))
 	for _, region := range knownRegions {
-		if _, exists := newElements[region]; !exists {
-			newElements[region] = types.StringValue("automatic")
+		attrTypes[region] = types.StringType
+	}
+	return attrTypes
+}
+
+// regionSchemaAttributes builds the nested schema attributes for the
+// regions object, one Optional+Computed string attribute per known region
+// code, each defaulting to "automatic".
+func regionSchemaAttributes() map[string]schema.Attribute {
+	attrs := make(map[string]schema.Attribute, len(knownRegions))
+	for _, region := range knownRegions {
+		attrs[region] = schema.StringAttribute{
+			Description: fmt.Sprintf("Region value for city code %q. Defaults to %q.", region, automaticRegionValue),
+			Optional:    true,
+			Computed:    true,
+			Default:     stringdefault.StaticString(automaticRegionValue),
 		}
 	}
+	return attrs
+}
 
-	newMap, diags := types.MapValue(types.StringType, newElements)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+// defaultRegionsObject returns the regions object value used as the
+// top-level default when the whole `regions` attribute is omitted from
+// config, with every known region set to "automatic".
+func defaultRegionsObject() types.Object {
+	values := make(map[string]attr.Value, len(knownRegions))
+	for _, region := range knownRegions {
+		values[region] = types.StringValue(automaticRegionValue)
 	}
+	obj, _ := types.ObjectValue(regionAttributeTypes(), values)
+	return obj
+}
 
-	resp.PlanValue = newMap
+// regionsObjectToMap converts a regions object value into a plain map for
+// sending to the API.
+func regionsObjectToMap(obj types.Object) map[string]string {
+	attrs := obj.Attributes()
+	result := make(map[string]string, len(attrs))
+	for region, v := range attrs {
+		if s, ok := v.(types.String); ok && !s.IsNull() {
+			result[region] = s.ValueString()
+		}
+	}
+	return result
+}
+
+// regionsMapToObject converts the API's regions map into a regions object
+// value, defaulting any known region missing from the API response to
+// "automatic".
+func regionsMapToObject(regionsMap map[string]string) (types.Object, diag.Diagnostics) {
+	values := make(map[string]attr.Value, len(knownRegions))
+	for _, region := range knownRegions {
+		if v, ok := regionsMap[region]; ok {
+			values[region] = types.StringValue(v)
+		} else {
+			values[region] = types.StringValue(automaticRegionValue)
+		}
+	}
+	return types.ObjectValue(regionAttributeTypes(), values)
 }
 
 // LoadBalancerRegionsResource implements the load balancer regions resource.
@@ -80,7 +113,7 @@ type LoadBalancerRegionsResource struct {
 type LoadBalancerRegionsResourceModel struct {
 	ConfigID types.String `tfsdk:"config_id"`
 	LBID     types.String `tfsdk:"lb_id"`
-	Regions  types.Map    `tfsdk:"regions"`
+	Regions  types.Object `tfsdk:"regions"`
 	// Computed
 	Name            types.String `tfsdk:"name"`
 	UpstreamRegions types.List   `tfsdk:"upstream_regions"`
@@ -112,14 +145,15 @@ func (r *LoadBalancerRegionsResource) Schema(_ context.Context, _ resource.Schem
 				Description: "The load balancer ID.",
 				Required:    true,
 			},
-			"regions": schema.MapAttribute{
-				Description: "Map of city codes to region values. Missing keys default to 'automatic'.",
-				Optional:    true,
-				Computed:    true,
-				ElementType: types.StringType,
-				PlanModifiers: []planmodifier.Map{
-					allRegionsDefaultModifier{},
-				},
+			"regions": schema.SingleNestedAttribute{
+				Description: fmt.Sprintf(
+					"Region values keyed by city code (%s). Any region not explicitly set defaults to %q.",
+					strings.Join(knownRegions, ", "), automaticRegionValue,
+				),
+				Optional:   true,
+				Computed:   true,
+				Attributes: regionSchemaAttributes(),
+				Default:    objectdefault.StaticValue(defaultRegionsObject()),
 			},
 			"name": schema.StringAttribute{
 				Description: "Load balancer name.",
@@ -153,18 +187,11 @@ func (r *LoadBalancerRegionsResource) Create(ctx context.Context, req resource.C
 		return
 	}
 
-	// Convert regions map
-	var regionsMap map[string]string
-	resp.Diagnostics.Append(plan.Regions.ElementsAs(ctx, &regionsMap, false)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	updateReq := &client.LoadBalancerRegionsUpdateRequest{
 		LBs: []client.LoadBalancerRegionUpdate{
 			{
 				ID:      plan.LBID.ValueString(),
-				Regions: regionsMap,
+				Regions: regionsObjectToMap(plan.Regions),
 			},
 		},
 	}
@@ -192,6 +219,9 @@ func (r *LoadBalancerRegionsResource) Create(ctx context.Context, req resource.C
 	for _, lb := range lbRegions.LBs {
 		if lb.ID == plan.LBID.ValueString() {
 			plan.Name = types.StringValue(lb.Name)
+			regionsObj, diags := regionsMapToObject(lb.Regions)
+			resp.Diagnostics.Append(diags...)
+			plan.Regions = regionsObj
 			upstreamRegions, diags := types.ListValueFrom(ctx, types.StringType, lb.UpstreamRegions)
 			resp.Diagnostics.Append(diags...)
 			plan.UpstreamRegions = upstreamRegions
@@ -226,14 +256,9 @@ func (r *LoadBalancerRegionsResource) Read(ctx context.Context, req resource.Rea
 			found = true
 			state.Name = types.StringValue(lb.Name)
 
-			// Convert regions map
-			regionsMapValues := make(map[string]attr.Value)
-			for k, v := range lb.Regions {
-				regionsMapValues[k] = types.StringValue(v)
-			}
-			regionsMap, diags := types.MapValue(types.StringType, regionsMapValues)
+			regionsObj, diags := regionsMapToObject(lb.Regions)
 			resp.Diagnostics.Append(diags...)
-			state.Regions = regionsMap
+			state.Regions = regionsObj
 
 			upstreamRegions, diags := types.ListValueFrom(ctx, types.StringType, lb.UpstreamRegions)
 			resp.Diagnostics.Append(diags...)
@@ -258,18 +283,11 @@ func (r *LoadBalancerRegionsResource) Update(ctx context.Context, req resource.U
 		return
 	}
 
-	// Convert regions map
-	var regionsMap map[string]string
-	resp.Diagnostics.Append(plan.Regions.ElementsAs(ctx, &regionsMap, false)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	updateReq := &client.LoadBalancerRegionsUpdateRequest{
 		LBs: []client.LoadBalancerRegionUpdate{
 			{
 				ID:      plan.LBID.ValueString(),
-				Regions: regionsMap,
+				Regions: regionsObjectToMap(plan.Regions),
 			},
 		},
 	}
@@ -297,6 +315,9 @@ func (r *LoadBalancerRegionsResource) Update(ctx context.Context, req resource.U
 	for _, lb := range lbRegions.LBs {
 		if lb.ID == plan.LBID.ValueString() {
 			plan.Name = types.StringValue(lb.Name)
+			regionsObj, diags := regionsMapToObject(lb.Regions)
+			resp.Diagnostics.Append(diags...)
+			plan.Regions = regionsObj
 			upstreamRegions, diags := types.ListValueFrom(ctx, types.StringType, lb.UpstreamRegions)
 			resp.Diagnostics.Append(diags...)
 			plan.UpstreamRegions = upstreamRegions

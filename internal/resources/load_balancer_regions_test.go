@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,127 +82,79 @@ func TestLoadBalancerRegionsResource_ImportState_TooManyParts(t *testing.T) {
 	assert.True(t, resp.Diagnostics.HasError())
 }
 
-func TestAllRegionsDefaultModifier_Description(t *testing.T) {
-	m := allRegionsDefaultModifier{}
-	ctx := context.Background()
-
-	desc := m.Description(ctx)
-	assert.Contains(t, desc, "automatic")
-
-	mdDesc := m.MarkdownDescription(ctx)
-	assert.Contains(t, mdDesc, "automatic")
+func TestKnownRegions_Contains_ExpectedRegions(t *testing.T) {
+	expected := []string{"ams", "ash", "ffm", "hkg", "lax", "lon", "nyc", "sgp", "stl"}
+	assert.Equal(t, expected, knownRegions)
 }
 
-func TestAllRegionsDefaultModifier_PlanModifyMap_NullValue(t *testing.T) {
-	m := allRegionsDefaultModifier{}
+func TestRegionsSchemaAttribute_HasOneEntryPerKnownRegionWithDefaults(t *testing.T) {
+	r := &LoadBalancerRegionsResource{}
 	ctx := context.Background()
 
-	req := planmodifier.MapRequest{
-		PlanValue: types.MapNull(types.StringType),
-	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
+	req := schemaReq()
+	resp := schemaResp()
+	r.Schema(ctx, req, resp)
+
+	regionsAttr, ok := resp.Schema.Attributes["regions"].(schema.SingleNestedAttribute)
+	require.True(t, ok, "expected regions to be a SingleNestedAttribute")
+	require.Len(t, regionsAttr.Attributes, len(knownRegions))
+
+	for _, region := range knownRegions {
+		sub, ok := regionsAttr.Attributes[region].(schema.StringAttribute)
+		require.True(t, ok, "expected region %q to be a StringAttribute", region)
+		assert.True(t, sub.Optional, "region %q should be optional", region)
+		assert.True(t, sub.Computed, "region %q should be computed", region)
+		require.NotNil(t, sub.Default, "region %q should have a default", region)
 	}
 
-	m.PlanModifyMap(ctx, req, resp)
-
-	// Should not modify null values
-	assert.True(t, resp.PlanValue.IsNull())
-	assert.False(t, resp.Diagnostics.HasError())
+	// Unknown city codes must not be accepted as valid attributes.
+	_, ok = regionsAttr.Attributes["sfo"]
+	assert.False(t, ok, "unexpected region attribute for unknown city code")
 }
 
-func TestAllRegionsDefaultModifier_PlanModifyMap_UnknownValue(t *testing.T) {
-	m := allRegionsDefaultModifier{}
-	ctx := context.Background()
-
-	req := planmodifier.MapRequest{
-		PlanValue: types.MapUnknown(types.StringType),
+func TestRegionsObjectToMap(t *testing.T) {
+	values := make(map[string]attr.Value, len(knownRegions))
+	for _, region := range knownRegions {
+		values[region] = types.StringValue("custom-" + region)
 	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
-	}
-
-	m.PlanModifyMap(ctx, req, resp)
-
-	// Should not modify unknown values
-	assert.True(t, resp.PlanValue.IsUnknown())
-	assert.False(t, resp.Diagnostics.HasError())
-}
-
-func TestAllRegionsDefaultModifier_PlanModifyMap_FillsMissingRegions(t *testing.T) {
-	m := allRegionsDefaultModifier{}
-	ctx := context.Background()
-
-	// Only provide two regions
-	planMap, diags := types.MapValue(types.StringType, map[string]attr.Value{
-		"ams": types.StringValue("us-east-1"),
-		"ffm": types.StringValue("eu-central-1"),
-	})
+	obj, diags := types.ObjectValue(regionAttributeTypes(), values)
 	require.False(t, diags.HasError())
 
-	req := planmodifier.MapRequest{
-		PlanValue: planMap,
+	result := regionsObjectToMap(obj)
+	require.Len(t, result, len(knownRegions))
+	for _, region := range knownRegions {
+		assert.Equal(t, "custom-"+region, result[region])
 	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
+}
+
+func TestRegionsMapToObject_FillsMissingRegionsWithAutomatic(t *testing.T) {
+	// Only provide two regions from the "API".
+	apiRegions := map[string]string{
+		"ams": "ffm",
+		"ffm": "custom",
 	}
 
-	m.PlanModifyMap(ctx, req, resp)
+	obj, diags := regionsMapToObject(apiRegions)
+	require.False(t, diags.HasError())
 
-	assert.False(t, resp.Diagnostics.HasError())
-	assert.False(t, resp.PlanValue.IsNull())
+	result := regionsObjectToMap(obj)
+	require.Len(t, result, len(knownRegions))
+	assert.Equal(t, "ffm", result["ams"])
+	assert.Equal(t, "custom", result["ffm"])
 
-	var elements map[string]string
-	resp.PlanValue.ElementsAs(ctx, &elements, false)
-
-	// Should have all known regions
-	assert.Len(t, elements, len(knownRegions))
-
-	// Provided regions should be preserved
-	assert.Equal(t, "us-east-1", elements["ams"])
-	assert.Equal(t, "eu-central-1", elements["ffm"])
-
-	// Missing regions should be filled with "automatic"
 	for _, region := range knownRegions {
 		if region != "ams" && region != "ffm" {
-			assert.Equal(t, "automatic", elements[region], "region %q should be 'automatic'", region)
+			assert.Equal(t, automaticRegionValue, result[region], "region %q should default to automatic", region)
 		}
 	}
 }
 
-func TestAllRegionsDefaultModifier_PlanModifyMap_AllRegionsPresent(t *testing.T) {
-	m := allRegionsDefaultModifier{}
-	ctx := context.Background()
+func TestDefaultRegionsObject_AllRegionsAutomatic(t *testing.T) {
+	obj := defaultRegionsObject()
 
-	// Provide all regions
-	values := make(map[string]attr.Value)
+	result := regionsObjectToMap(obj)
+	require.Len(t, result, len(knownRegions))
 	for _, region := range knownRegions {
-		values[region] = types.StringValue("custom-" + region)
+		assert.Equal(t, automaticRegionValue, result[region])
 	}
-	planMap, diags := types.MapValue(types.StringType, values)
-	require.False(t, diags.HasError())
-
-	req := planmodifier.MapRequest{
-		PlanValue: planMap,
-	}
-	resp := &planmodifier.MapResponse{
-		PlanValue: req.PlanValue,
-	}
-
-	m.PlanModifyMap(ctx, req, resp)
-
-	assert.False(t, resp.Diagnostics.HasError())
-
-	var elements map[string]string
-	resp.PlanValue.ElementsAs(ctx, &elements, false)
-
-	// All custom values should be preserved
-	for _, region := range knownRegions {
-		assert.Equal(t, "custom-"+region, elements[region])
-	}
-}
-
-func TestKnownRegions_Contains_ExpectedRegions(t *testing.T) {
-	expected := []string{"ams", "ash", "ffm", "hkg", "lax", "lon", "nyc", "sgp", "stl"}
-	assert.Equal(t, expected, knownRegions)
 }

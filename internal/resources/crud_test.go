@@ -408,7 +408,7 @@ func TestLoadBalancerRegionsResource_Create_NilClient(t *testing.T) {
 	vals := map[string]tftypes.Value{
 		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
 		"lb_id":     tftypes.NewValue(tftypes.String, "lb1"),
-		"regions":   tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{"ams": tftypes.NewValue(tftypes.String, "automatic")}),
+		"regions":   regionsObjectTFValue(map[string]string{"ams": "automatic"}),
 	}
 	testCreateWithNilClient(t, r, vals)
 }
@@ -418,7 +418,7 @@ func TestLoadBalancerRegionsResource_Read_NilClient(t *testing.T) {
 	vals := map[string]tftypes.Value{
 		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
 		"lb_id":     tftypes.NewValue(tftypes.String, "lb1"),
-		"regions":   tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{"ams": tftypes.NewValue(tftypes.String, "automatic")}),
+		"regions":   regionsObjectTFValue(map[string]string{"ams": "automatic"}),
 	}
 	testReadWithNilClient(t, r, vals)
 }
@@ -428,7 +428,7 @@ func TestLoadBalancerRegionsResource_Update_NilClient(t *testing.T) {
 	vals := map[string]tftypes.Value{
 		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
 		"lb_id":     tftypes.NewValue(tftypes.String, "lb1"),
-		"regions":   tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, map[string]tftypes.Value{"ams": tftypes.NewValue(tftypes.String, "eu-west-1")}),
+		"regions":   regionsObjectTFValue(map[string]string{"ams": "eu-west-1"}),
 	}
 	testUpdateWithNilClient(t, r, vals)
 }
