@@ -1,8 +1,10 @@
 # Example: Load Balancer Regions Resource
 #
 # Manages the region configuration for a load balancer.
-# Missing region keys are automatically filled with "automatic".
-# Known region codes: ams, ash, ffm, hkg, lax, lon, sgp, stl
+# Region codes left out of the map are set to "automatic" on the server,
+# but only the keys listed below are tracked in Terraform state.
+# Known region codes: ams, ash, ffm, hkg, lax, lon, nyc, sgp, stl
+# (any other key is rejected during `terraform plan`/`validate`)
 
 data "link11waap_config" "main" {}
 
