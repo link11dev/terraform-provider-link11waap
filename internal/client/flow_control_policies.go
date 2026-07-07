@@ -25,6 +25,11 @@ func (c *Client) ListFlowControlPolicies(ctx context.Context, configID string) (
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
 
+	if result.Total != len(result.Items) {
+		return nil, fmt.Errorf("server reported %d flow control policies, but only %d were returned",
+			result.Total, len(result.Items))
+	}
+
 	return result.Items, nil
 }
 

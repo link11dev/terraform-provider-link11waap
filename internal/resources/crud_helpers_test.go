@@ -197,5 +197,16 @@ func testConfigureWithInvalidType(t *testing.T, r interface {
 	}
 }
 
+// regionsMapTFValue builds a tftypes.Map value for the load balancer
+// regions resource's `regions` attribute containing exactly the given
+// entries.
+func regionsMapTFValue(entries map[string]string) tftypes.Value {
+	values := make(map[string]tftypes.Value, len(entries))
+	for region, v := range entries {
+		values[region] = tftypes.NewValue(tftypes.String, v)
+	}
+	return tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, values)
+}
+
 // Suppress unused import warnings
 var _ = fmt.Sprintf
