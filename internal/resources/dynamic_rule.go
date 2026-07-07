@@ -20,8 +20,9 @@ import (
 )
 
 var (
-	_ resource.Resource                = &DynamicRuleResource{}
-	_ resource.ResourceWithImportState = &DynamicRuleResource{}
+	_ resource.Resource                   = &DynamicRuleResource{}
+	_ resource.ResourceWithImportState    = &DynamicRuleResource{}
+	_ resource.ResourceWithValidateConfig = &DynamicRuleResource{}
 )
 
 // DynamicRuleResource implements the resource for managing a dynamic rule
@@ -163,6 +164,37 @@ func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest
 				},
 			},
 		},
+	}
+}
+
+// ValidateConfig validates that exactly one 'include' block and exactly one 'exclude' block are specified.
+func (r *DynamicRuleResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var config DynamicRuleResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	includeCount := 0
+	if !config.Include.IsNull() && !config.Include.IsUnknown() {
+		includeCount = len(config.Include.Elements())
+	}
+	excludeCount := 0
+	if !config.Exclude.IsNull() && !config.Exclude.IsUnknown() {
+		excludeCount = len(config.Exclude.Elements())
+	}
+
+	if includeCount != 1 {
+		resp.Diagnostics.AddError(
+			"Invalid include configuration",
+			"Exactly one 'include' block must be specified.",
+		)
+	}
+	if excludeCount != 1 {
+		resp.Diagnostics.AddError(
+			"Invalid exclude configuration",
+			"Exactly one 'exclude' block must be specified.",
+		)
 	}
 }
 

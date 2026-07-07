@@ -4,8 +4,26 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
+
+// tagFilterObjType returns the tftypes.Object type matching the include/exclude nested blocks.
+func tagFilterObjType() tftypes.Object {
+	return tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"relation": tftypes.String,
+		"tags":     tftypes.List{ElementType: tftypes.String},
+	}}
+}
+
+func tagFilterSetValue(objType tftypes.Object, entries ...map[string]tftypes.Value) tftypes.Value {
+	elems := make([]tftypes.Value, 0, len(entries))
+	for _, e := range entries {
+		elems = append(elems, tftypes.NewValue(objType, e))
+	}
+	return tftypes.NewValue(tftypes.Set{ElementType: objType}, elems)
+}
 
 func TestNewDynamicRuleResource(t *testing.T) {
 	r := NewDynamicRuleResource()
@@ -106,5 +124,43 @@ func TestBuildDynamicRuleAPIModel_BasicFields(t *testing.T) {
 	}
 	if rule.Target != "ip" || rule.Threshold != 100 || rule.TTL != 300 {
 		t.Errorf("unexpected mapping: %+v", rule)
+	}
+}
+
+func TestDynamicRuleResource_ValidateConfig_RequiresBothIncludeAndExclude(t *testing.T) {
+	ctx := context.Background()
+	r := &DynamicRuleResource{}
+	objType := tagFilterObjType()
+	emptySet := tagFilterSetValue(objType)
+	oneEntry := map[string]tftypes.Value{
+		"relation": tftypes.NewValue(tftypes.String, "OR"),
+		"tags":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{tftypes.NewValue(tftypes.String, "a")}),
+	}
+
+	tests := []struct {
+		name      string
+		include   tftypes.Value
+		exclude   tftypes.Value
+		expectErr bool
+	}{
+		{"only include", tagFilterSetValue(objType, oneEntry), emptySet, true},
+		{"only exclude", emptySet, tagFilterSetValue(objType, oneEntry), true},
+		{"neither", emptySet, emptySet, true},
+		{"both", tagFilterSetValue(objType, oneEntry), tagFilterSetValue(objType, oneEntry), false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+				"include": tc.include,
+				"exclude": tc.exclude,
+			})
+			req := resource.ValidateConfigRequest{Config: config}
+			resp := &resource.ValidateConfigResponse{}
+			r.ValidateConfig(ctx, req, resp)
+			if resp.Diagnostics.HasError() != tc.expectErr {
+				t.Errorf("expected HasError=%v, got diags: %v", tc.expectErr, resp.Diagnostics)
+			}
+		})
 	}
 }
