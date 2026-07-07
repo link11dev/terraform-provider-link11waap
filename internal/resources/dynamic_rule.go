@@ -95,8 +95,11 @@ func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Required:    true,
 			},
 			"ttl": schema.Int64Attribute{
-				Description: "Time-to-live in seconds for the dynamic rule ban.",
+				Description: "Time-to-live in seconds for the dynamic rule ban. Must be a positive multiple of 3600 (full hours).",
 				Required:    true,
+				Validators: []validator.Int64{
+					FullHours(),
+				},
 			},
 			"active": schema.BoolAttribute{
 				Description: "Whether the dynamic rule is active.",
