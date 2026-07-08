@@ -111,8 +111,13 @@ func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Required:    true,
 			},
 			"target": schema.StringAttribute{
-				Description: "The request attribute the rule counts on (e.g., 'ip', 'session', 'uri').",
-				Required:    true,
+				Description: "The request attribute the rule counts on. One of 'ip', 'asn', 'country', 'organization', " +
+					"or one of 'arguments', 'headers', 'cookies' followed by an underscore and a name " +
+					"(e.g. 'headers_x-test-header', 'cookies_some_cookie').",
+				Required: true,
+				Validators: []validator.String{
+					DynamicRuleTarget(),
+				},
 			},
 			"action": schema.StringAttribute{
 				Description: "Action to take when the threshold is exceeded.",
