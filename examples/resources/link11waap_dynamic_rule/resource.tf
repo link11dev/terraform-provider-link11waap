@@ -22,7 +22,9 @@ resource "link11waap_dynamic_rule" "burst_protection" {
   # Whether IP filtering is offloaded to the edge
   offload_ip_filtering = false
 
-  # What the rule counts on (e.g., "ip", "session", "uri")
+  # What the rule counts on (e.g., "ip", asn", "country", "organization",
+  # or one of "arguments", "headers", "cookies" followed by an underscore and
+  # a name (e.g. "cookies_some_cookie" or "headers_x-test-header"))
   target = "ip"
 
   # Action to take when the threshold is exceeded
