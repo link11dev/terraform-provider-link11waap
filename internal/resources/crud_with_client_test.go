@@ -589,6 +589,35 @@ func TestSecurityPolicyResource_CRUD_WithFailingClient(t *testing.T) {
 	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, vals) })
 }
 
+// --- Dynamic Rule with client ---
+
+func TestDynamicRuleResource_CRUD_WithFailingClient(t *testing.T) {
+	r := &DynamicRuleResource{}
+	vals := map[string]tftypes.Value{
+		"config_id":            tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":                   tftypes.NewValue(tftypes.String, "dr1"),
+		"name":                 tftypes.NewValue(tftypes.String, "test-rule"),
+		"description":          tftypes.NewValue(tftypes.String, ""),
+		"threshold":            tftypes.NewValue(tftypes.Number, 100),
+		"timeframe":            tftypes.NewValue(tftypes.Number, 60),
+		"ttl":                  tftypes.NewValue(tftypes.Number, 300),
+		"active":               tftypes.NewValue(tftypes.Bool, true),
+		"offload_ip_filtering": tftypes.NewValue(tftypes.Bool, false),
+		"target":               tftypes.NewValue(tftypes.String, "ip"),
+		"action":               tftypes.NewValue(tftypes.String, "action-monitor"),
+	}
+	createVals := make(map[string]tftypes.Value)
+	for k, v := range vals {
+		createVals[k] = v
+	}
+	createVals["id"] = tftypes.NewValue(tftypes.String, nil)
+
+	t.Run("Create", func(t *testing.T) { crudCreateWithClient(t, r, createVals) })
+	t.Run("Read", func(t *testing.T) { crudReadWithClient(t, r, vals) })
+	t.Run("Update", func(t *testing.T) { crudUpdateWithClient(t, r, vals) })
+	t.Run("Delete", func(t *testing.T) { crudDeleteWithClient(t, r, vals) })
+}
+
 // --- Rate Limit Rule with client ---
 
 func TestRateLimitRuleResource_CRUD_WithFailingClient(t *testing.T) {
