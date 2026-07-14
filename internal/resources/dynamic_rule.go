@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -90,10 +91,12 @@ func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"threshold": schema.Int64Attribute{
 				Description: "Maximum number of matching requests allowed within the timeframe.",
 				Required:    true,
+				Validators:  []validator.Int64{int64validator.AtLeast(1)},
 			},
 			"timeframe": schema.Int64Attribute{
 				Description: "Time window in seconds for counting requests.",
 				Required:    true,
+				Validators:  []validator.Int64{int64validator.AtLeast(1)},
 			},
 			"ttl": schema.Int64Attribute{
 				Description: "Time-to-live in seconds for the dynamic rule ban. Must be a positive multiple of 3600 (full hours).",
