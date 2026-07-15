@@ -86,36 +86,52 @@ provider "link11waap" {
 
 | Resource | Description |
 |----------|-------------|
-| `link11waap_server_group` | Manages server groups (sites/applications) |
-| `link11waap_acl_profile` | Manages ACL profiles for access control |
-| `link11waap_certificate` | Manages SSL/TLS certificates (uploaded or Let's Encrypt) |
-| `link11waap_load_balancer_certificate` | Attaches certificates to load balancers |
-| `link11waap_load_balancer_regions` | Configures load balancer region settings |
-| `link11waap_security_policy` | Manages security policies for server groups |
-| `link11waap_backend_service` | Manages backend services for server groups |
-| `link11waap_proxy_template` | Manages proxy templates for server groups |
-| `link11waap_global_filter` | Manages global filters for traffic filtering |
-| `link11waap_planet_trusted_nets` | Manages trusted networks for the planet configuration |
-| `link11waap_publish` | Triggers configuration publishing to edge nodes |
-| `link11waap_user` | Manages user accounts |
+| `link11waap_server_group` | Manages a Server Group (site/domain) in Link11 WAAP |
+| `link11waap_acl_profile` | Manages an ACL Profile in Link11 WAAP |
+| `link11waap_certificate` | Manages an SSL certificate in Link11 WAAP |
+| `link11waap_load_balancer_certificate` | Attaches a certificate to a load balancer in Link11 WAAP |
+| `link11waap_load_balancer_regions` | Manages load balancer region configuration in Link11 WAAP |
+| `link11waap_security_policy` | Manages a Security Policy in Link11 WAAP |
+| `link11waap_backend_service` | Manages a Backend Service in Link11 WAAP |
+| `link11waap_proxy_template` | Manages a Proxy Template in Link11 WAAP |
+| `link11waap_global_filter` | Manages a Global Filter in Link11 WAAP |
+| `link11waap_planet_trusted_nets` | Manages the trusted networks list of the planet in Link11 WAAP |
+| `link11waap_publish` | Publishes configuration changes in Link11 WAAP |
+| `link11waap_user` | Manages a User account in Link11 WAAP |
+| `link11waap_mobile_application_group` | Manages a Mobile Application Group in Link11 WAAP |
+| `link11waap_rate_limit_rule` | Manages a Rate Limit Rule in Link11 WAAP |
+| `link11waap_flow_control_policy` | Manages a Flow Control Policy in Link11 WAAP |
+| `link11waap_edge_function` | Manages an Edge Function in Link11 WAAP |
+| `link11waap_content_filter_rule` | Manages a Content Filter Rule in Link11 WAAP |
+| `link11waap_content_filter_profile` | Manages a Content Filter Profile in Link11 WAAP |
+| `link11waap_action` | Manages an Action in Link11 WAAP |
+| `link11waap_dynamic_rule` | Manages a Dynamic Rule in Link11 WAAP |
 
 ## Data Sources
 
 | Data Source | Description |
 |-------------|-------------|
-| `link11waap_config` | Reads current configuration metadata |
-| `link11waap_acl_profiles` | Lists all ACL profiles |
-| `link11waap_server_groups` | Lists all server groups |
-| `link11waap_certificates` | Lists all certificates |
-| `link11waap_load_balancers` | Lists all load balancers |
-| `link11waap_load_balancer_regions` | Reads load balancer region configuration |
-| `link11waap_security_policies` | Lists all security policies |
-| `link11waap_proxy_templates` | Lists all proxy templates |
-| `link11waap_global_filters` | Lists all global filters |
-| `link11waap_global_filter` | Reads a specific global filter by name |
-| `link11waap_backend_services` | Lists all backend services |
-| `link11waap_planet_trusted_nets` | Reads the trusted networks for the planet configuration |
-| `link11waap_users` | Lists all user accounts |
+| `link11waap_config` | Retrieves configuration information from Link11 WAAP |
+| `link11waap_acl_profiles` | Lists all ACL profiles in a configuration |
+| `link11waap_server_groups` | Lists all server groups in a configuration |
+| `link11waap_certificates` | Lists all certificates in a configuration |
+| `link11waap_load_balancers` | Lists all load balancers in a configuration |
+| `link11waap_load_balancer_regions` | Retrieves load balancer region configuration |
+| `link11waap_security_policies` | Lists all security policies in a configuration |
+| `link11waap_proxy_templates` | Lists all proxy templates in a configuration |
+| `link11waap_global_filters` | Lists all global filters in a configuration |
+| `link11waap_global_filter` | Fetches a single global filter by name from a configuration |
+| `link11waap_backend_services` | Lists all backend services in a configuration |
+| `link11waap_planet_trusted_nets` | Reads the trusted networks list from the planet |
+| `link11waap_users` | Lists all users across all organizations |
+| `link11waap_mobile_application_groups` | Lists all mobile application groups in a configuration |
+| `link11waap_rate_limit_rules` | Lists all rate limit rules in a configuration |
+| `link11waap_flow_control_policies` | Lists all flow control policies in a configuration |
+| `link11waap_edge_functions` | Lists all edge functions in a configuration |
+| `link11waap_content_filter_rules` | Lists all content filter rules in a configuration |
+| `link11waap_content_filter_profiles` | Lists content filter profiles in a configuration |
+| `link11waap_actions` | Lists actions in a configuration |
+| `link11waap_dynamic_rules` | Lists all dynamic rules in a configuration |
 
 ## Usage Examples
 
