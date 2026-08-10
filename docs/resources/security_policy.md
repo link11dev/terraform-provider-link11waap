@@ -140,6 +140,16 @@ resource "link11waap_security_policy" "web" {
     backend_service               = link11waap_backend_service.web.id
     rate_limit_rules              = [link11waap_rate_limit_rule.api.id]
   }
+
+  # Site level map is server-side map entry that is automatically created by Link11 WAAP under the hood
+  # for every security policy if map with id "__site_level__" is not provided in the resource definition.
+  # It cannot be deleted. You can only modify the `rate_limit_rules` and `edge_functions` for the site level map entry.
+  # For example, you can add a rate limit rule or an edge function to the site level map entry.
+  map {
+    id                            = "__site_level__" # Must be set to "__site_level__" for the site level map entry.
+    rate_limit_rules              = [link11waap_rate_limit_rule.CHANGE_ME.id]
+    edge_functions                = [link11waap_edge_function.CHANGE_ME.id]
+  }
 }
 ```
 
@@ -168,19 +178,19 @@ resource "link11waap_security_policy" "web" {
 
 Required:
 
-- `acl_profile` (String) ID of the ACL profile to apply.
-- `acl_profile_active` (Boolean) Whether the ACL profile is active.
-- `backend_service` (String) ID of the backend service.
-- `content_filter_profile` (String) ID of the content filter profile to apply.
-- `content_filter_profile_active` (Boolean) Whether the content filter profile is active.
 - `id` (String) Map entry ID.
-- `match` (String) Match expression (path/header matching).
-- `name` (String) Map entry name.
 
 Optional:
 
-- `description` (String) Description of the map entry.
+- `acl_profile` (String) ID of the ACL profile to apply. Required for every entry except "__site_level__", which must leave it unset.
+- `acl_profile_active` (Boolean) Whether the ACL profile is active. Required for every entry except "__site_level__", which must leave it unset.
+- `backend_service` (String) ID of the backend service. Required for every entry except "__site_level__", which must leave it unset.
+- `content_filter_profile` (String) ID of the content filter profile to apply. Required for every entry except "__site_level__", which must leave it unset.
+- `content_filter_profile_active` (Boolean) Whether the content filter profile is active. Required for every entry except "__site_level__", which must leave it unset.
+- `description` (String) Description of the map entry. Must be left unset for "__site_level__".
 - `edge_functions` (List of String) List of edge function IDs to apply.
+- `match` (String) Match expression (path/header matching). Required for every entry except "__site_level__", which must leave it unset.
+- `name` (String) Map entry name. Required for every entry except "__site_level__", which must leave it unset.
 - `rate_limit_rules` (List of String) List of rate limit rule IDs to apply.
 
 

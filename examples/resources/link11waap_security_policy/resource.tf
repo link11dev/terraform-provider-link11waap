@@ -125,4 +125,14 @@ resource "link11waap_security_policy" "web" {
     backend_service               = link11waap_backend_service.web.id
     rate_limit_rules              = [link11waap_rate_limit_rule.api.id]
   }
+
+  # Site level map is server-side map entry that is automatically created by Link11 WAAP under the hood
+  # for every security policy if map with id "__site_level__" is not provided in the resource definition.
+  # It cannot be deleted. You can only modify the `rate_limit_rules` and `edge_functions` for the site level map entry.
+  # For example, you can add a rate limit rule or an edge function to the site level map entry.
+  map {
+    id                            = "__site_level__" # Must be set to "__site_level__" for the site level map entry.
+    rate_limit_rules              = [link11waap_rate_limit_rule.CHANGE_ME.id]
+    edge_functions                = [link11waap_edge_function.CHANGE_ME.id]
+  }
 }
