@@ -293,20 +293,7 @@ func TestRoundTrip_APIToModelToAPI(t *testing.T) {
 	}
 }
 
-func TestMergeDefaultMaps_AddsSiteLevelToPlan(t *testing.T) {
-	siteLevel := SecProfileMapModel{
-		ID:                         types.StringValue("__site_level__"),
-		Name:                       types.StringValue("Site Level"),
-		Match:                      types.StringValue("__site_level__"),
-		ACLProfile:                 types.StringValue("__acldefault__"),
-		ACLProfileActive:           types.BoolValue(false),
-		ContentFilterProfile:       types.StringValue("__defaultcontentfilter__"),
-		ContentFilterProfileActive: types.BoolValue(false),
-		BackendService:             types.StringValue("__default__"),
-		Description:                types.StringValue(""),
-		RateLimitRules:             types.ListNull(types.StringType),
-		EdgeFunctions:              types.ListNull(types.StringType),
-	}
+func TestApplySiteLevelDefaults_AddsSiteLevelToPlan(t *testing.T) {
 	apiEntry := SecProfileMapModel{
 		ID:                         types.StringValue("api-entry"),
 		Name:                       types.StringValue("API"),
@@ -321,76 +308,165 @@ func TestMergeDefaultMaps_AddsSiteLevelToPlan(t *testing.T) {
 		EdgeFunctions:              types.ListNull(types.StringType),
 	}
 
-	stateMaps := []SecProfileMapModel{apiEntry, siteLevel}
 	planMaps := []SecProfileMapModel{apiEntry}
 
-	result := mergeDefaultMaps(stateMaps, planMaps)
+	result := applySiteLevelDefaults(planMaps)
 
-	if result == nil {
-		t.Fatal("expected non-nil merged maps, got nil")
-	}
 	if len(result) != 2 {
-		t.Errorf("expected 2 maps, got %d", len(result))
+		t.Fatalf("expected 2 maps, got %d", len(result))
 	}
 
-	found := false
-	for _, m := range result {
-		if m.ID.ValueString() == "__site_level__" {
-			found = true
+	var siteLevel *SecProfileMapModel
+	for i := range result {
+		if result[i].ID.ValueString() == siteLevelMapID {
+			siteLevel = &result[i]
 			break
 		}
 	}
-	if !found {
-		t.Error("expected __site_level__ map to be present in merged result")
+	if siteLevel == nil {
+		t.Fatal("expected __site_level__ map to be present in merged result")
 	}
+	assertSiteLevelMapMatchesBaseline(t, *siteLevel)
 }
 
-func TestMergeDefaultMaps_NoChangeWhenAlreadyInPlan(t *testing.T) {
+func TestApplySiteLevelDefaults_LocksNonRateLimitFieldsEvenIfPresent(t *testing.T) {
+	// Defensive: even if a __site_level__ entry somehow carries values that
+	// diverge from the hardcoded baseline (ValidateConfig should have already
+	// rejected this), applySiteLevelDefaults must still lock every field but
+	// rate_limit_rules/edge_functions back to the baseline.
+	rl, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"rl-1"})
+	ef, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"ef-1"})
+
 	siteLevel := SecProfileMapModel{
-		ID:                   types.StringValue("__site_level__"),
-		Name:                 types.StringValue("Site Level"),
-		Match:                types.StringValue("__site_level__"),
-		ACLProfile:           types.StringValue("__acldefault__"),
-		BackendService:       types.StringValue("__default__"),
-		ContentFilterProfile: types.StringValue("__defaultcontentfilter__"),
-		RateLimitRules:       types.ListNull(types.StringType),
-		EdgeFunctions:        types.ListNull(types.StringType),
+		ID:                   types.StringValue(siteLevelMapID),
+		Name:                 types.StringValue("Custom Name"),
+		Match:                types.StringValue(siteLevelMapID),
+		ACLProfile:           types.StringValue("acl-custom"),
+		BackendService:       types.StringValue("be-custom"),
+		ContentFilterProfile: types.StringValue("cf-custom"),
+		RateLimitRules:       rl,
+		EdgeFunctions:        ef,
 	}
 
-	stateMaps := []SecProfileMapModel{siteLevel}
 	planMaps := []SecProfileMapModel{siteLevel}
 
-	result := mergeDefaultMaps(stateMaps, planMaps)
-	if result != nil {
-		t.Errorf("expected nil (no changes needed), got %v", result)
+	result := applySiteLevelDefaults(planMaps)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 map, got %d", len(result))
+	}
+	assertSiteLevelMapMatchesBaseline(t, result[0])
+
+	if !result[0].RateLimitRules.Equal(rl) {
+		t.Errorf("expected RateLimitRules to be carried over as %v, got %v", rl, result[0].RateLimitRules)
+	}
+	if !result[0].EdgeFunctions.Equal(ef) {
+		t.Errorf("expected EdgeFunctions to be carried over as %v, got %v", ef, result[0].EdgeFunctions)
 	}
 }
 
-func TestMergeDefaultMaps_NoChangeWhenNotInState(t *testing.T) {
-	apiEntry := SecProfileMapModel{
-		ID:                   types.StringValue("api-entry"),
-		Name:                 types.StringValue("API"),
-		Match:                types.StringValue("/api/"),
-		ACLProfile:           types.StringValue("acl-1"),
-		BackendService:       types.StringValue("be-1"),
-		ContentFilterProfile: types.StringValue("cf-1"),
-		RateLimitRules:       types.ListNull(types.StringType),
-		EdgeFunctions:        types.ListNull(types.StringType),
+func TestApplySiteLevelDefaults_EmptyPlanMaps(t *testing.T) {
+	result := applySiteLevelDefaults(nil)
+	if len(result) != 1 {
+		t.Fatalf("expected the hardcoded baseline to be injected into an empty plan, got %v", result)
+	}
+	assertSiteLevelMapMatchesBaseline(t, result[0])
+}
+
+func TestValidateSecProfileMapEntry_SiteLevelRejectsOtherFields(t *testing.T) {
+	m := SecProfileMapModel{
+		ID:                         types.StringValue(siteLevelMapID),
+		Name:                       types.StringValue("Custom"),
+		Match:                      types.StringNull(),
+		ACLProfile:                 types.StringNull(),
+		ACLProfileActive:           types.BoolNull(),
+		ContentFilterProfile:       types.StringNull(),
+		ContentFilterProfileActive: types.BoolNull(),
+		BackendService:             types.StringNull(),
+		Description:                types.StringNull(),
+		RateLimitRules:             types.ListNull(types.StringType),
+		EdgeFunctions:              types.ListNull(types.StringType),
 	}
 
-	stateMaps := []SecProfileMapModel{apiEntry}
-	planMaps := []SecProfileMapModel{apiEntry}
-
-	result := mergeDefaultMaps(stateMaps, planMaps)
-	if result != nil {
-		t.Errorf("expected nil (no default map in state), got %v", result)
+	errs := validateSecProfileMapEntry(m)
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly 1 error for the single set field (name), got %d: %v", len(errs), errs)
 	}
 }
 
-func TestMergeDefaultMaps_EmptyStateMaps(t *testing.T) {
-	result := mergeDefaultMaps(nil, nil)
-	if result != nil {
-		t.Errorf("expected nil for empty state, got %v", result)
+func TestValidateSecProfileMapEntry_SiteLevelAllowsOnlyIDRateLimitAndEdgeFunctions(t *testing.T) {
+	rl, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"rl-1"})
+	ef, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"ef-1"})
+
+	m := SecProfileMapModel{
+		ID:                         types.StringValue(siteLevelMapID),
+		Name:                       types.StringNull(),
+		Match:                      types.StringNull(),
+		ACLProfile:                 types.StringNull(),
+		ACLProfileActive:           types.BoolNull(),
+		ContentFilterProfile:       types.StringNull(),
+		ContentFilterProfileActive: types.BoolNull(),
+		BackendService:             types.StringNull(),
+		Description:                types.StringNull(),
+		RateLimitRules:             rl,
+		EdgeFunctions:              ef,
+	}
+
+	errs := validateSecProfileMapEntry(m)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+}
+
+func TestValidateSecProfileMapEntry_NonSiteLevelRequiresAllFields(t *testing.T) {
+	m := SecProfileMapModel{
+		ID:                         types.StringValue("api-entry"),
+		Name:                       types.StringValue("API"),
+		Match:                      types.StringNull(),
+		ACLProfile:                 types.StringNull(),
+		ACLProfileActive:           types.BoolValue(true),
+		ContentFilterProfile:       types.StringNull(),
+		ContentFilterProfileActive: types.BoolValue(true),
+		BackendService:             types.StringNull(),
+	}
+
+	errs := validateSecProfileMapEntry(m)
+	if len(errs) != 4 {
+		t.Fatalf("expected 4 missing-field errors (match, acl_profile, content_filter_profile, backend_service), got %d: %v", len(errs), errs)
+	}
+}
+
+// assertSiteLevelMapMatchesBaseline verifies m matches the hardcoded default
+// definition returned by defaultSiteLevelMap.
+func assertSiteLevelMapMatchesBaseline(t *testing.T, m SecProfileMapModel) {
+	t.Helper()
+	want := defaultSiteLevelMap()
+
+	if m.ID.ValueString() != want.ID.ValueString() {
+		t.Errorf("ID: expected %q, got %q", want.ID.ValueString(), m.ID.ValueString())
+	}
+	if m.Name.ValueString() != want.Name.ValueString() {
+		t.Errorf("Name: expected %q, got %q", want.Name.ValueString(), m.Name.ValueString())
+	}
+	if m.Match.ValueString() != want.Match.ValueString() {
+		t.Errorf("Match: expected %q, got %q", want.Match.ValueString(), m.Match.ValueString())
+	}
+	if m.ACLProfile.ValueString() != want.ACLProfile.ValueString() {
+		t.Errorf("ACLProfile: expected %q, got %q", want.ACLProfile.ValueString(), m.ACLProfile.ValueString())
+	}
+	if m.ACLProfileActive.ValueBool() != want.ACLProfileActive.ValueBool() {
+		t.Errorf("ACLProfileActive: expected %v, got %v", want.ACLProfileActive.ValueBool(), m.ACLProfileActive.ValueBool())
+	}
+	if m.ContentFilterProfile.ValueString() != want.ContentFilterProfile.ValueString() {
+		t.Errorf("ContentFilterProfile: expected %q, got %q", want.ContentFilterProfile.ValueString(), m.ContentFilterProfile.ValueString())
+	}
+	if m.ContentFilterProfileActive.ValueBool() != want.ContentFilterProfileActive.ValueBool() {
+		t.Errorf("ContentFilterProfileActive: expected %v, got %v", want.ContentFilterProfileActive.ValueBool(), m.ContentFilterProfileActive.ValueBool())
+	}
+	if m.BackendService.ValueString() != want.BackendService.ValueString() {
+		t.Errorf("BackendService: expected %q, got %q", want.BackendService.ValueString(), m.BackendService.ValueString())
+	}
+	if m.Description.ValueString() != want.Description.ValueString() {
+		t.Errorf("Description: expected %q, got %q", want.Description.ValueString(), m.Description.ValueString())
 	}
 }
 
