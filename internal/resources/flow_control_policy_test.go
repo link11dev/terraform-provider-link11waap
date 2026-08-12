@@ -119,6 +119,56 @@ func TestBuildFlowControlKeys_AllKeyTypes(t *testing.T) {
 	}
 }
 
+// mustFlowControlKeyList builds a types.List of FlowControlKeyModel for use in
+// FlowControlPolicyResourceModel literals.
+func mustFlowControlKeyList(t *testing.T, keys []providerutil.FlowControlKeyModel) types.List {
+	t.Helper()
+	l, diags := types.ListValueFrom(context.Background(), providerutil.FlowControlKeyModelType(), keys)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return l
+}
+
+// mustFlowControlStepList builds a types.List of FlowControlStepModel for use in
+// FlowControlPolicyResourceModel literals.
+func mustFlowControlStepList(t *testing.T, steps []providerutil.FlowControlStepModel) types.List {
+	t.Helper()
+	l, diags := types.ListValueFrom(context.Background(), providerutil.FlowControlStepModelType(), steps)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return l
+}
+
+// flowControlKeysOf decodes a types.List of providerutil.FlowControlKeyModel for assertions.
+func flowControlKeysOf(t *testing.T, l types.List) []providerutil.FlowControlKeyModel {
+	t.Helper()
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []providerutil.FlowControlKeyModel
+	diags := l.ElementsAs(context.Background(), &models, false)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return models
+}
+
+// flowControlStepsOf decodes a types.List of providerutil.FlowControlStepModel for assertions.
+func flowControlStepsOf(t *testing.T, l types.List) []providerutil.FlowControlStepModel {
+	t.Helper()
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []providerutil.FlowControlStepModel
+	diags := l.ElementsAs(context.Background(), &models, false)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return models
+}
+
 func TestParseFlowControlKeys_AllKeyTypes(t *testing.T) {
 	entries := []client.FlowControlKeyEntry{
 		{Attrs: strPtr("session")},
@@ -127,7 +177,11 @@ func TestParseFlowControlKeys_AllKeyTypes(t *testing.T) {
 		{Cookies: strPtr("sid")},
 		{Headers: strPtr("x-key")},
 	}
-	result := providerutil.ParseFlowControlKeys(entries)
+	list, diags := providerutil.ParseFlowControlKeys(context.Background(), entries)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	result := flowControlKeysOf(t, list)
 	if len(result) != 5 {
 		t.Fatalf("expected 5 models, got %d", len(result))
 	}
@@ -156,7 +210,11 @@ func TestFlowControlKeys_RoundTrip(t *testing.T) {
 		{Attrs: strPtr("ip")},
 		{Cookies: strPtr("sid")},
 	}
-	parsed := providerutil.ParseFlowControlKeys(entries)
+	list, diags := providerutil.ParseFlowControlKeys(context.Background(), entries)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	parsed := flowControlKeysOf(t, list)
 	built := buildFlowControlKeys(parsed)
 	if len(built) != 2 {
 		t.Fatalf("expected 2, got %d", len(built))
@@ -209,11 +267,11 @@ func TestParseFlowControlSteps(t *testing.T) {
 	steps := []client.FlowStepItem{
 		{Method: "POST", URI: "/checkout", Args: map[string]string{"step": "2"}},
 	}
-	var diags diag.Diagnostics
-	result := providerutil.ParseFlowControlSteps(ctx, steps, &diags)
+	list, diags := providerutil.ParseFlowControlSteps(ctx, steps)
 	if diags.HasError() {
 		t.Fatalf("unexpected diags: %v", diags)
 	}
+	result := flowControlStepsOf(t, list)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(result))
 	}
@@ -262,12 +320,12 @@ func TestBuildFlowControlPolicyAPIModel_BasicFields(t *testing.T) {
 		Tags:        tags,
 		Include:     include,
 		Exclude:     types.ListNull(types.StringType),
-		Key: []providerutil.FlowControlKeyModel{
+		Key: mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
-		Steps: []providerutil.FlowControlStepModel{
+		}),
+		Steps: mustFlowControlStepList(t, []providerutil.FlowControlStepModel{
 			{Method: types.StringValue("GET"), URI: types.StringValue("/a"), Headers: types.MapNull(types.StringType), Cookies: types.MapNull(types.StringType), Args: types.MapNull(types.StringType), Plugins: types.MapNull(types.StringType)},
-		},
+		}),
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -308,8 +366,8 @@ func TestBuildFlowControlPolicyAPIModel_NonNullExclude(t *testing.T) {
 		Tags:        types.ListNull(types.StringType),
 		Include:     types.ListNull(types.StringType),
 		Exclude:     exclude,
-		Key:         []providerutil.FlowControlKeyModel{},
-		Steps:       []providerutil.FlowControlStepModel{},
+		Key:         mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{}),
+		Steps:       mustFlowControlStepList(t, []providerutil.FlowControlStepModel{}),
 		ConfigID:    types.StringValue("cfg1"),
 	}
 
@@ -369,11 +427,11 @@ func TestParseFlowControlSteps_AllMaps(t *testing.T) {
 			Plugins: map[string]string{"plugin-key": "plugin-val"},
 		},
 	}
-	var diags diag.Diagnostics
-	result := providerutil.ParseFlowControlSteps(ctx, steps, &diags)
+	list, diags := providerutil.ParseFlowControlSteps(ctx, steps)
 	if diags.HasError() {
 		t.Fatalf("unexpected diags: %v", diags)
 	}
+	result := flowControlStepsOf(t, list)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(result))
 	}
