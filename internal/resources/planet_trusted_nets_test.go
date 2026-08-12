@@ -450,25 +450,29 @@ func TestPlanetTrustedNetsResource_ImportState_InvalidSuffix(t *testing.T) {
 }
 
 func TestBuildPlanetBody(t *testing.T) {
-	plan := &PlanetTrustedNetsResourceModel{
-		ConfigID: types.StringValue("cfg1"),
-		TrustedNets: []TrustedNetModel{
-			{
-				Source:  types.StringValue("ip"),
-				Address: types.StringValue("1.2.3.4"),
-				GfID:    types.StringValue(""),
-				Comment: types.StringValue("office"),
-			},
-			{
-				Source:  types.StringValue("global_filter"),
-				Address: types.StringValue(""),
-				GfID:    types.StringValue("gf1"),
-				Comment: types.StringValue("filter"),
-			},
+	ctx := context.Background()
+	trustedNetsList, diags := trustedNetModelsToList(ctx, []TrustedNetModel{
+		{
+			Source:  types.StringValue("ip"),
+			Address: types.StringValue("1.2.3.4"),
+			GfID:    types.StringValue(""),
+			Comment: types.StringValue("office"),
 		},
+		{
+			Source:  types.StringValue("global_filter"),
+			Address: types.StringValue(""),
+			GfID:    types.StringValue("gf1"),
+			Comment: types.StringValue("filter"),
+		},
+	})
+	require.False(t, diags.HasError())
+	plan := &PlanetTrustedNetsResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		TrustedNets: trustedNetsList,
 	}
 
-	planet := buildPlanetBody(plan)
+	planet, diags := buildPlanetBody(ctx, plan)
+	require.False(t, diags.HasError())
 	require.NotNil(t, planet)
 	assert.Equal(t, defaultPlanetEntryID, planet.ID)
 	assert.Equal(t, defaultPlanetEntryID, planet.Name)
@@ -490,12 +494,16 @@ func TestBuildPlanetBody(t *testing.T) {
 }
 
 func TestBuildPlanetBody_EmptyTrustedNets(t *testing.T) {
+	ctx := context.Background()
+	trustedNetsList, diags := trustedNetModelsToList(ctx, []TrustedNetModel{})
+	require.False(t, diags.HasError())
 	plan := &PlanetTrustedNetsResourceModel{
 		ConfigID:    types.StringValue("cfg1"),
-		TrustedNets: []TrustedNetModel{},
+		TrustedNets: trustedNetsList,
 	}
 
-	planet := buildPlanetBody(plan)
+	planet, diags := buildPlanetBody(ctx, plan)
+	require.False(t, diags.HasError())
 	require.NotNil(t, planet)
 	assert.Empty(t, planet.TrustedNets)
 	assert.NotNil(t, planet.TrustedNets)
