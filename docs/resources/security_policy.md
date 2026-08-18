@@ -145,6 +145,10 @@ resource "link11waap_security_policy" "web" {
   # for every security policy if map with id "__site_level__" is not provided in the resource definition.
   # It cannot be deleted. You can only modify the `rate_limit_rules` and `edge_functions` for the site level map entry.
   # For example, you can add a rate limit rule or an edge function to the site level map entry.
+  #
+  # If you omit this `map` block entirely, or set `rate_limit_rules`/`edge_functions` to null within it,
+  # whatever is currently configured on the server (e.g. set via the Link11 WAAP UI/API) is left untouched.
+  # Terraform will not clear it. Set them explicitly here only when you want Terraform to manage their value.
   map {
     id                            = "__site_level__" # Must be set to "__site_level__" for the site level map entry.
     rate_limit_rules              = [link11waap_rate_limit_rule.CHANGE_ME.id]
