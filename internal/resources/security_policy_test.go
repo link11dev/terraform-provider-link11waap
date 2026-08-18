@@ -293,7 +293,7 @@ func TestRoundTrip_APIToModelToAPI(t *testing.T) {
 	}
 }
 
-func TestApplySiteLevelDefaults_AddsSiteLevelToPlan(t *testing.T) {
+func TestResolveSiteLevelMap_AddsBaselineWhenNoPriorState(t *testing.T) {
 	apiEntry := SecProfileMapModel{
 		ID:                         types.StringValue("api-entry"),
 		Name:                       types.StringValue("API"),
@@ -310,7 +310,8 @@ func TestApplySiteLevelDefaults_AddsSiteLevelToPlan(t *testing.T) {
 
 	planMaps := []SecProfileMapModel{apiEntry}
 
-	result := applySiteLevelDefaults(planMaps)
+	// No prior state (e.g. initial create): the hardcoded baseline is injected.
+	result := resolveSiteLevelMap(planMaps, nil)
 
 	if len(result) != 2 {
 		t.Fatalf("expected 2 maps, got %d", len(result))
@@ -329,43 +330,83 @@ func TestApplySiteLevelDefaults_AddsSiteLevelToPlan(t *testing.T) {
 	assertSiteLevelMapMatchesBaseline(t, *siteLevel)
 }
 
-func TestApplySiteLevelDefaults_LocksNonRateLimitFieldsEvenIfPresent(t *testing.T) {
-	// Defensive: even if a __site_level__ entry somehow carries values that
-	// diverge from the hardcoded baseline (ValidateConfig should have already
-	// rejected this), applySiteLevelDefaults must still lock every field but
-	// rate_limit_rules/edge_functions back to the baseline.
+func TestResolveSiteLevelMap_PropagatesPriorStateWhenPresent(t *testing.T) {
+	// The site-level entry may be managed outside of Terraform (e.g. via the
+	// API/UI), so once it exists in prior state, its fields must be carried
+	// forward as-is rather than reset to the hardcoded baseline.
 	rl, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"rl-1"})
 	ef, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"ef-1"})
 
-	siteLevel := SecProfileMapModel{
+	priorSiteLevel := SecProfileMapModel{
 		ID:                   types.StringValue(siteLevelMapID),
-		Name:                 types.StringValue("Custom Name"),
+		Name:                 types.StringValue("Site Level"),
 		Match:                types.StringValue(siteLevelMapID),
 		ACLProfile:           types.StringValue("acl-custom"),
+		ACLProfileActive:     types.BoolValue(true),
 		BackendService:       types.StringValue("be-custom"),
 		ContentFilterProfile: types.StringValue("cf-custom"),
+		Description:          types.StringValue(""),
 		RateLimitRules:       rl,
 		EdgeFunctions:        ef,
 	}
 
-	planMaps := []SecProfileMapModel{siteLevel}
+	// The entry isn't declared in config, so it's absent from the plan.
+	planMaps := []SecProfileMapModel{}
+	priorMaps := []SecProfileMapModel{priorSiteLevel}
 
-	result := applySiteLevelDefaults(planMaps)
+	result := resolveSiteLevelMap(planMaps, priorMaps)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 map, got %d", len(result))
 	}
-	assertSiteLevelMapMatchesBaseline(t, result[0])
 
-	if !result[0].RateLimitRules.Equal(rl) {
-		t.Errorf("expected RateLimitRules to be carried over as %v, got %v", rl, result[0].RateLimitRules)
+	got := result[0]
+	if got.ACLProfile.ValueString() != "acl-custom" {
+		t.Errorf("ACLProfile: expected prior value %q to be preserved, got %q", "acl-custom", got.ACLProfile.ValueString())
 	}
-	if !result[0].EdgeFunctions.Equal(ef) {
-		t.Errorf("expected EdgeFunctions to be carried over as %v, got %v", ef, result[0].EdgeFunctions)
+	if got.BackendService.ValueString() != "be-custom" {
+		t.Errorf("BackendService: expected prior value %q to be preserved, got %q", "be-custom", got.BackendService.ValueString())
+	}
+	if !got.RateLimitRules.Equal(rl) {
+		t.Errorf("expected RateLimitRules to be carried over as %v, got %v", rl, got.RateLimitRules)
+	}
+	if !got.EdgeFunctions.Equal(ef) {
+		t.Errorf("expected EdgeFunctions to be carried over as %v, got %v", ef, got.EdgeFunctions)
 	}
 }
 
-func TestApplySiteLevelDefaults_EmptyPlanMaps(t *testing.T) {
-	result := applySiteLevelDefaults(nil)
+func TestResolveSiteLevelMap_ExplicitConfigOverridesRateLimitAndEdgeFunctions(t *testing.T) {
+	// The user may still explicitly manage rate_limit_rules/edge_functions by
+	// setting them in config; that value must win over the prior state's.
+	oldRL, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"old-rl"})
+	oldEF, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"old-ef"})
+	newRL, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"new-rl"})
+	newEF, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"new-ef"})
+
+	priorSiteLevel := defaultSiteLevelMap()
+	priorSiteLevel.RateLimitRules = oldRL
+	priorSiteLevel.EdgeFunctions = oldEF
+
+	planSiteLevel := SecProfileMapModel{
+		ID:             types.StringValue(siteLevelMapID),
+		RateLimitRules: newRL,
+		EdgeFunctions:  newEF,
+	}
+
+	result := resolveSiteLevelMap([]SecProfileMapModel{planSiteLevel}, []SecProfileMapModel{priorSiteLevel})
+	if len(result) != 1 {
+		t.Fatalf("expected 1 map, got %d", len(result))
+	}
+
+	if !result[0].RateLimitRules.Equal(newRL) {
+		t.Errorf("expected RateLimitRules to be overridden with %v, got %v", newRL, result[0].RateLimitRules)
+	}
+	if !result[0].EdgeFunctions.Equal(newEF) {
+		t.Errorf("expected EdgeFunctions to be overridden with %v, got %v", newEF, result[0].EdgeFunctions)
+	}
+}
+
+func TestResolveSiteLevelMap_EmptyPlanAndPriorMaps(t *testing.T) {
+	result := resolveSiteLevelMap(nil, nil)
 	if len(result) != 1 {
 		t.Fatalf("expected the hardcoded baseline to be injected into an empty plan, got %v", result)
 	}

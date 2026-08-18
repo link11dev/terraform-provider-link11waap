@@ -25,7 +25,8 @@ var (
 
 // siteLevelMapID is the well-known ID of the server-managed map entry. It is
 // always present on the server; users may only control its rate_limit_rules
-// and edge_functions fields, everything else is locked to defaultSiteLevelMap.
+// and edge_functions fields via config, everything else is resolved from prior
+// state (or defaultSiteLevelMap when there is none). See resolveSiteLevelMap.
 const siteLevelMapID = "__site_level__"
 
 // SecurityPolicyResource implements the security policy resource.
@@ -326,11 +327,11 @@ func validateSecProfileMapEntry(m SecProfileMapModel) []string {
 }
 
 // ModifyPlan ensures the server-managed "__site_level__" map entry is always present
-// in the plan and always carries its hardcoded baseline definition for every field
-// except rate_limit_rules and edge_functions. If the entry is absent from the
-// configuration it is injected; if present, ValidateConfig has already guaranteed its
-// other fields were left unset, so locking them here only ever surfaces/corrects
-// server-side drift (e.g. changed out-of-band) rather than discarding user input.
+// in the plan. Because this entry may be managed outside of Terraform (e.g. via the
+// API/UI), its fields are carried forward from prior state whenever it already exists
+// there, rather than being forced back to the hardcoded baseline — only a brand-new
+// entry (no prior state, e.g. initial create) gets the hardcoded baseline. The user may
+// still explicitly manage rate_limit_rules/edge_functions by setting them in config.
 func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	// Skip on destroy, where there is no plan to modify.
 	if req.Plan.Raw.IsNull() {
@@ -343,7 +344,17 @@ func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.Mo
 		return
 	}
 
-	plan.Map = applySiteLevelDefaults(plan.Map)
+	var priorMaps []SecProfileMapModel
+	if !req.State.Raw.IsNull() {
+		var state SecurityPolicyResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		priorMaps = state.Map
+	}
+
+	plan.Map = resolveSiteLevelMap(plan.Map, priorMaps)
 	resp.Diagnostics.Append(resp.Plan.Set(ctx, plan)...)
 }
 
@@ -607,26 +618,41 @@ func defaultSiteLevelMap() SecProfileMapModel {
 	}
 }
 
-// applySiteLevelDefaults returns a new map slice where the "__site_level__" entry
-// always carries the hardcoded baseline definition for every field except
-// rate_limit_rules and edge_functions, which are carried over from planMaps. If the
-// entry is absent it is appended with the full baseline (null rate_limit_rules/
-// edge_functions).
-func applySiteLevelDefaults(planMaps []SecProfileMapModel) []SecProfileMapModel {
+// resolveSiteLevelMap returns a new map slice where the "__site_level__" entry is
+// resolved from priorMaps (the prior state) whenever it already exists there, so that
+// any of its fields managed outside of Terraform (e.g. via the API/UI) are left
+// untouched instead of being forced back to the hardcoded baseline. The user may still
+// explicitly manage rate_limit_rules/edge_functions by setting them in the
+// configuration; any other value in planMaps is ignored, since ValidateConfig
+// guarantees they were left unset there. If the entry has no prior state (e.g. initial
+// create), the hardcoded baseline is used instead.
+func resolveSiteLevelMap(planMaps, priorMaps []SecProfileMapModel) []SecProfileMapModel {
 	result := make([]SecProfileMapModel, len(planMaps))
 	copy(result, planMaps)
 
+	baseline := defaultSiteLevelMap()
+	for _, m := range priorMaps {
+		if m.ID.ValueString() == siteLevelMapID {
+			baseline = m
+			break
+		}
+	}
+
 	for i, m := range result {
 		if m.ID.ValueString() == siteLevelMapID {
-			locked := defaultSiteLevelMap()
-			locked.RateLimitRules = m.RateLimitRules
-			locked.EdgeFunctions = m.EdgeFunctions
+			locked := baseline
+			if !m.RateLimitRules.IsNull() {
+				locked.RateLimitRules = m.RateLimitRules
+			}
+			if !m.EdgeFunctions.IsNull() {
+				locked.EdgeFunctions = m.EdgeFunctions
+			}
 			result[i] = locked
 			return result
 		}
 	}
 
-	return append(result, defaultSiteLevelMap())
+	return append(result, baseline)
 }
 
 // parseSessionKeys converts the API interface{} to []SessionKeyModel.
