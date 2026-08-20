@@ -23,6 +23,12 @@ var (
 	_ resource.ResourceWithModifyPlan     = &SecurityPolicyResource{}
 )
 
+// siteLevelMapID is the well-known ID of the server-managed map entry. It is
+// always present on the server; users may only control its rate_limit_rules
+// and edge_functions fields via config, everything else is resolved from prior
+// state (or defaultSiteLevelMap when there is none). See resolveSiteLevelMap.
+const siteLevelMapID = "__site_level__"
+
 // SecurityPolicyResource implements the security policy resource.
 type SecurityPolicyResource struct {
 	client *client.Client
@@ -119,35 +125,42 @@ func (r *SecurityPolicyResource) Schema(_ context.Context, _ resource.SchemaRequ
 							Required:    true,
 						},
 						"name": schema.StringAttribute{
-							Description: "Map entry name.",
-							Required:    true,
+							Description: "Map entry name. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"match": schema.StringAttribute{
-							Description: "Match expression (path/header matching).",
-							Required:    true,
+							Description: "Match expression (path/header matching). Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"acl_profile": schema.StringAttribute{
-							Description: "ID of the ACL profile to apply.",
-							Required:    true,
+							Description: "ID of the ACL profile to apply. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"acl_profile_active": schema.BoolAttribute{
-							Description: "Whether the ACL profile is active.",
-							Required:    true,
+							Description: "Whether the ACL profile is active. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"content_filter_profile": schema.StringAttribute{
-							Description: "ID of the content filter profile to apply.",
-							Required:    true,
+							Description: "ID of the content filter profile to apply. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"content_filter_profile_active": schema.BoolAttribute{
-							Description: "Whether the content filter profile is active.",
-							Required:    true,
+							Description: "Whether the content filter profile is active. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"backend_service": schema.StringAttribute{
-							Description: "ID of the backend service.",
-							Required:    true,
+							Description: "ID of the backend service. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"description": schema.StringAttribute{
-							Description: "Description of the map entry.",
+							Description: "Description of the map entry. Must be left unset for \"__site_level__\".",
 							Optional:    true,
 							Computed:    true,
 							Default:     stringdefault.StaticString(""),
@@ -239,19 +252,89 @@ func (r *SecurityPolicyResource) ValidateConfig(ctx context.Context, req resourc
 			)
 		}
 	}
+
+	// Validate field presence rules for each map entry: the site-level entry
+	// may only set id, rate_limit_rules, and edge_functions; every other entry
+	// must set all of the remaining fields.
+	for _, m := range config.Map {
+		if m.ID.IsUnknown() {
+			continue
+		}
+		for _, msg := range validateSecProfileMapEntry(m) {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("map"),
+				"Invalid Security Profile Map Entry",
+				msg,
+			)
+		}
+	}
 }
 
-// ModifyPlan ensures that server-managed default maps (like __site_level__) are preserved
-// in the plan when they exist in the prior state, preventing spurious diffs.
-func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	// Only handle updates: both state and plan must exist.
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return
+// validateSecProfileMapEntry checks the field-presence rules for a single map
+// entry and returns human-readable error messages for any violations. The
+// "__site_level__" entry is server-managed and may only set id,
+// rate_limit_rules, and edge_functions; every other entry must set all of
+// name, match, acl_profile, acl_profile_active, content_filter_profile,
+// content_filter_profile_active, and backend_service.
+func validateSecProfileMapEntry(m SecProfileMapModel) []string {
+	type check struct {
+		field string
+		bad   bool
 	}
 
-	var state SecurityPolicyResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
+	var errs []string
+
+	if m.ID.ValueString() == siteLevelMapID {
+		forbidden := []check{
+			{"name", !m.Name.IsNull()},
+			{"match", !m.Match.IsNull()},
+			{"acl_profile", !m.ACLProfile.IsNull()},
+			{"acl_profile_active", !m.ACLProfileActive.IsNull()},
+			{"content_filter_profile", !m.ContentFilterProfile.IsNull()},
+			{"content_filter_profile_active", !m.ContentFilterProfileActive.IsNull()},
+			{"backend_service", !m.BackendService.IsNull()},
+			{"description", !m.Description.IsNull()},
+		}
+		for _, c := range forbidden {
+			if c.bad {
+				errs = append(errs, fmt.Sprintf(
+					"map entry %q may only set id, rate_limit_rules, and edge_functions; remove %q, it is locked to a server-managed baseline",
+					siteLevelMapID, c.field,
+				))
+			}
+		}
+		return errs
+	}
+
+	required := []check{
+		{"name", m.Name.IsNull()},
+		{"match", m.Match.IsNull()},
+		{"acl_profile", m.ACLProfile.IsNull()},
+		{"acl_profile_active", m.ACLProfileActive.IsNull()},
+		{"content_filter_profile", m.ContentFilterProfile.IsNull()},
+		{"content_filter_profile_active", m.ContentFilterProfileActive.IsNull()},
+		{"backend_service", m.BackendService.IsNull()},
+	}
+	for _, c := range required {
+		if c.bad {
+			errs = append(errs, fmt.Sprintf(
+				"map entry %q is missing required field %q",
+				m.ID.ValueString(), c.field,
+			))
+		}
+	}
+	return errs
+}
+
+// ModifyPlan ensures the server-managed "__site_level__" map entry is always present
+// in the plan. Because this entry may be managed outside of Terraform (e.g. via the
+// API/UI), its fields are carried forward from prior state whenever it already exists
+// there, rather than being forced back to the hardcoded baseline — only a brand-new
+// entry (no prior state, e.g. initial create) gets the hardcoded baseline. The user may
+// still explicitly manage rate_limit_rules/edge_functions by setting them in config.
+func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Skip on destroy, where there is no plan to modify.
+	if req.Plan.Raw.IsNull() {
 		return
 	}
 
@@ -261,11 +344,18 @@ func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.Mo
 		return
 	}
 
-	merged := mergeDefaultMaps(state.Map, plan.Map)
-	if merged != nil {
-		plan.Map = merged
-		resp.Diagnostics.Append(resp.Plan.Set(ctx, plan)...)
+	var priorMaps []SecProfileMapModel
+	if !req.State.Raw.IsNull() {
+		var state SecurityPolicyResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		priorMaps = state.Map
 	}
+
+	plan.Map = resolveSiteLevelMap(plan.Map, priorMaps)
+	resp.Diagnostics.Append(resp.Plan.Set(ctx, plan)...)
 }
 
 // countSessionKeyFields counts the number of non-null, non-unknown fields in a SessionKeyModel.
@@ -509,37 +599,60 @@ func buildSecProfileMapEntry(ctx context.Context, m SecProfileMapModel) client.S
 	return entry
 }
 
-// mergeDefaultMaps returns a new map slice that includes server-managed default maps
-// from the prior state that are absent from the planned maps, preventing spurious diffs.
-// Returns nil if no changes are needed.
-func mergeDefaultMaps(stateMaps, planMaps []SecProfileMapModel) []SecProfileMapModel {
-	const defaultMapID = "__site_level__"
+// defaultSiteLevelMap returns the hardcoded baseline definition for the server-managed
+// "__site_level__" map entry, used when it is absent from the user's configuration and
+// for every field but rate_limit_rules/edge_functions when it is present.
+func defaultSiteLevelMap() SecProfileMapModel {
+	return SecProfileMapModel{
+		ID:                         types.StringValue(siteLevelMapID),
+		Name:                       types.StringValue("Site Level"),
+		Match:                      types.StringValue(siteLevelMapID),
+		ACLProfile:                 types.StringValue("__acldefault__"),
+		ACLProfileActive:           types.BoolValue(false),
+		ContentFilterProfile:       types.StringValue("__defaultcontentfilter__"),
+		ContentFilterProfileActive: types.BoolValue(false),
+		BackendService:             types.StringValue("__default__"),
+		Description:                types.StringValue(""),
+		RateLimitRules:             types.ListNull(types.StringType),
+		EdgeFunctions:              types.ListNull(types.StringType),
+	}
+}
 
-	// Find the default map in state.
-	var defaultMap *SecProfileMapModel
-	for i := range stateMaps {
-		if stateMaps[i].ID.ValueString() == defaultMapID {
-			m := stateMaps[i]
-			defaultMap = &m
+// resolveSiteLevelMap returns a new map slice where the "__site_level__" entry is
+// resolved from priorMaps (the prior state) whenever it already exists there, so that
+// any of its fields managed outside of Terraform (e.g. via the API/UI) are left
+// untouched instead of being forced back to the hardcoded baseline. The user may still
+// explicitly manage rate_limit_rules/edge_functions by setting them in the
+// configuration; any other value in planMaps is ignored, since ValidateConfig
+// guarantees they were left unset there. If the entry has no prior state (e.g. initial
+// create), the hardcoded baseline is used instead.
+func resolveSiteLevelMap(planMaps, priorMaps []SecProfileMapModel) []SecProfileMapModel {
+	result := make([]SecProfileMapModel, len(planMaps))
+	copy(result, planMaps)
+
+	baseline := defaultSiteLevelMap()
+	for _, m := range priorMaps {
+		if m.ID.ValueString() == siteLevelMapID {
+			baseline = m
 			break
 		}
 	}
-	if defaultMap == nil {
-		return nil
-	}
 
-	// Check if default map is already in the plan.
-	for _, m := range planMaps {
-		if m.ID.ValueString() == defaultMapID {
-			return nil
+	for i, m := range result {
+		if m.ID.ValueString() == siteLevelMapID {
+			locked := baseline
+			if !m.RateLimitRules.IsNull() {
+				locked.RateLimitRules = m.RateLimitRules
+			}
+			if !m.EdgeFunctions.IsNull() {
+				locked.EdgeFunctions = m.EdgeFunctions
+			}
+			result[i] = locked
+			return result
 		}
 	}
 
-	// Append the default map to the plan.
-	merged := make([]SecProfileMapModel, len(planMaps)+1)
-	copy(merged, planMaps)
-	merged[len(planMaps)] = *defaultMap
-	return merged
+	return append(result, baseline)
 }
 
 // parseSessionKeys converts the API interface{} to []SessionKeyModel.
