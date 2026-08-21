@@ -9,6 +9,29 @@ import (
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 )
 
+// mustSecProfileMapSet builds a types.Set of SecProfileMapModel for use in
+// SecurityPolicyResourceModel literals.
+func mustSecProfileMapSet(t *testing.T, models []SecProfileMapModel) types.Set {
+	t.Helper()
+	s, diags := secProfileMapModelsToSet(context.Background(), models)
+	if diags.HasError() {
+		t.Fatalf("mustSecProfileMapSet: %v", diags)
+	}
+	return s
+}
+
+// mustSessionKeyList builds a types.List of SessionKeyModel for use in
+// SecurityPolicyResourceModel literals.
+func mustSessionKeyList(t *testing.T, models []SessionKeyModel) types.List {
+	t.Helper()
+	l, diags := sessionKeyModelsToList(context.Background(), models)
+	if diags.HasError() {
+		t.Fatalf("mustSessionKeyList: %v", diags)
+	}
+	return l
+}
+
+
 func TestBuildSecProfileMapEntry_AllFields(t *testing.T) {
 	ctx := context.Background()
 
@@ -108,11 +131,14 @@ func TestBuildSecProfileMapEntry_EmptySlice(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         models,
+		Map:         mustSecProfileMapSet(t, models),
 		ConfigID:    types.StringValue("config-1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 	if sp.Map != nil {
 		t.Errorf("expected nil Map for empty slice, got %v", sp.Map)
 	}
@@ -157,13 +183,16 @@ func TestBuildSecProfileMapEntries_MultipleEntries(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         models,
+		Map:         mustSecProfileMapSet(t, models),
 		// Session:     types.StringNull(),
 		// c:  types.StringNull(),
 		ConfigID: types.StringValue("config-1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 	if len(sp.Map) != 2 {
 		t.Fatalf("expected 2 map entries, got %d", len(sp.Map))
 	}
@@ -877,15 +906,18 @@ func TestBuildSecurityPolicyAPIModel_WithTags(t *testing.T) {
 		Name:        types.StringValue("test-sp"),
 		Description: types.StringValue("desc"),
 		Tags:        tags,
-		Map:         []SecProfileMapModel{},
-		Session: []SessionKeyModel{
+		Map:         mustSecProfileMapSet(t, nil),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
-		SessionIDs: []SessionKeyModel{},
+		}),
+		SessionIDs: mustSessionKeyList(t, nil),
 		ConfigID:   types.StringValue("cfg1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	if sp.Name != "test-sp" {
 		t.Errorf("expected Name='test-sp', got '%s'", sp.Name)
@@ -910,13 +942,16 @@ func TestBuildSecurityPolicyAPIModel_NullTags(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         []SecProfileMapModel{},
-		Session:     []SessionKeyModel{},
-		SessionIDs:  []SessionKeyModel{},
+		Map:         mustSecProfileMapSet(t, nil),
+		Session:     mustSessionKeyList(t, nil),
+		SessionIDs:  mustSessionKeyList(t, nil),
 		ConfigID:    types.StringValue("cfg1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	if sp.Tags != nil {
 		t.Errorf("expected nil tags, got %v", sp.Tags)
@@ -931,17 +966,20 @@ func TestBuildSecurityPolicyAPIModel_WithSessionIDs(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         []SecProfileMapModel{},
-		Session: []SessionKeyModel{
+		Map:         mustSecProfileMapSet(t, nil),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
-		SessionIDs: []SessionKeyModel{
+		}),
+		SessionIDs: mustSessionKeyList(t, []SessionKeyModel{
 			{Attrs: types.StringNull(), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringValue("sid"), Headers: types.StringNull()},
-		},
+		}),
 		ConfigID: types.StringValue("cfg1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	sessionIDs := sp.SessionIDs.([]map[string]string)
 	if len(sessionIDs) != 1 {
