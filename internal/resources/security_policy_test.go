@@ -31,7 +31,6 @@ func mustSessionKeyList(t *testing.T, models []SessionKeyModel) types.List {
 	return l
 }
 
-
 func TestBuildSecProfileMapEntry_AllFields(t *testing.T) {
 	ctx := context.Background()
 
