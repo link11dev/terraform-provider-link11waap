@@ -241,6 +241,12 @@ func (r *CertificateResource) Create(ctx context.Context, req resource.CreateReq
 			break
 		}
 		if attempt >= certificateCreateReadMaxRetries {
+			// The certificate was created on the API side even though we
+			// can't read it back yet. Record its identifiers so Terraform
+			// tracks it (and reconciles via Read on the next plan) instead
+			// of creating a duplicate on the next apply.
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), plan.ConfigID)...)
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), plan.ID)...)
 			resp.Diagnostics.AddError(
 				"Error Reading Certificate",
 				"Could not read certificate after creation: "+err.Error(),
@@ -249,6 +255,8 @@ func (r *CertificateResource) Create(ctx context.Context, req resource.CreateReq
 		}
 		select {
 		case <-ctx.Done():
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), plan.ConfigID)...)
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), plan.ID)...)
 			resp.Diagnostics.AddError(
 				"Error Reading Certificate",
 				"Could not read certificate after creation: "+ctx.Err().Error(),

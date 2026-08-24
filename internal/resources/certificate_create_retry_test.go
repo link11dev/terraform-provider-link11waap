@@ -130,4 +130,13 @@ func TestCertificateResource_Create_FailsAfterExhaustingRetries(t *testing.T) {
 
 	assert.True(t, createResp.Diagnostics.HasError(), "expected error once retries are exhausted")
 	assert.Equal(t, certificateCreateReadMaxRetries+1, getAttempts, "expected the initial read plus all retries")
+
+	// Even though the read failed, the POST succeeded and the certificate
+	// exists on the API side. Its identifiers must still land in state so
+	// Terraform reconciles via Read on the next plan instead of creating a
+	// duplicate (orphaning the one that already exists).
+	var state CertificateResourceModel
+	assert.False(t, createResp.State.Get(context.Background(), &state).HasError())
+	assert.Equal(t, "cfg1", state.ConfigID.ValueString())
+	assert.False(t, state.ID.IsNull() || state.ID.IsUnknown(), "expected the certificate ID to be tracked in state to avoid orphaning the created certificate")
 }
