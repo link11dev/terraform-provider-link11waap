@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -181,6 +182,66 @@ func TestGlobalFilterResource_ValidateConfig_MutualExclusion(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGlobalFilterResource_ValidateConfig_UnknownEntryAndGroup reproduces the
+// crash scenario: a `dynamic "entry"`/`dynamic "group"` block whose
+// for_each cannot be resolved at plan time makes the whole `entry`/`group`
+// collection unknown (not just individual elements' values). ValidateConfig
+// must defer validation (mutual-exclusion and group checks) instead of
+// erroring or panicking on the unknown collection.
+func TestGlobalFilterResource_ValidateConfig_UnknownEntryAndGroup(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	rule := tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "OR"),
+		"entries_json": tftypes.NewValue(tftypes.String, nil),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, tftypes.UnknownValue),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, tftypes.UnknownValue),
+	})
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      rule,
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown entry/group collections should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestRuleModelToAPI_UnknownEntryAndGroup ensures the API-model builder
+// tolerates a wholly-unknown entry/group collection (as produced by an
+// unresolved `dynamic` block) without panicking. Only reachable at plan time;
+// by apply time Terraform guarantees fully known values.
+func TestRuleModelToAPI_UnknownEntryAndGroup(t *testing.T) {
+	ctx := context.Background()
+
+	rule := &RuleModel{
+		Relation:    types.StringValue("OR"),
+		EntriesJSON: jsontypes.NewNormalizedNull(),
+		Entries:     types.ListUnknown(entryModelType()),
+		Groups:      types.ListUnknown(groupModelType()),
+	}
+
+	var api interface{}
+	var diags diag.Diagnostics
+	assert.NotPanics(t, func() {
+		api, diags = ruleModelToAPI(ctx, rule)
+	})
+	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
+
+	m, ok := api.(map[string]interface{})
+	require.True(t, ok, "expected map[string]interface{}, got %T", api)
+	entries, ok := m["entries"].([]interface{})
+	require.True(t, ok, "expected entries to be []interface{}, got %T", m["entries"])
+	assert.Empty(t, entries, "entries should be empty when both collections are unknown")
 }
 
 func TestGlobalFilterResource_ValidateConfig_NilRule(t *testing.T) {

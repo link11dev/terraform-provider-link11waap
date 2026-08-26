@@ -13,6 +13,7 @@ import (
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 	"github.com/link11/terraform-provider-link11waap/internal/providerutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func strPtr(s string) *string { return &s }
@@ -678,4 +679,59 @@ func TestFlowControlPolicyResource_ValidateConfig_NoSteps(t *testing.T) {
 	resp := &resource.ValidateConfigResponse{}
 	r.ValidateConfig(ctx, req, resp)
 	assert.True(t, resp.Diagnostics.HasError(), "empty steps list should produce error")
+}
+
+// TestFlowControlPolicyResource_ValidateConfig_UnknownKeyAndSteps reproduces the
+// crash scenario at the ValidateConfig layer: a `dynamic "key"`/`dynamic
+// "steps"` block whose for_each cannot be resolved at plan time makes the whole
+// `key`/`steps` collection unknown (not just individual elements). ValidateConfig
+// must defer validation instead of erroring or panicking.
+func TestFlowControlPolicyResource_ValidateConfig_UnknownKeyAndSteps(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key":   tftypes.NewValue(tftypes.List{ElementType: keyObjType}, tftypes.UnknownValue),
+		"steps": tftypes.NewValue(tftypes.List{ElementType: stepObjType}, tftypes.UnknownValue),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown key/steps collections should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestBuildFlowControlPolicyAPIModel_UnknownKeyAndSteps ensures the API-model
+// builder tolerates a wholly-unknown key/steps collection (as produced by an
+// unresolved `dynamic` block) without panicking. This path is only reachable at
+// plan time (ValidateConfig); by apply time Terraform guarantees fully known
+// values, but the builder must not crash if invoked with unknowns.
+func TestBuildFlowControlPolicyAPIModel_UnknownKeyAndSteps(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &FlowControlPolicyResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Active:      types.BoolValue(true),
+		Timeframe:   types.Int64Value(60),
+		Tags:        types.ListNull(types.StringType),
+		Include:     types.ListNull(types.StringType),
+		Exclude:     types.ListNull(types.StringType),
+		Key:         types.ListUnknown(providerutil.FlowControlKeyModelType()),
+		Steps:       types.ListUnknown(providerutil.FlowControlStepModelType()),
+	}
+
+	var policy *client.FlowControl
+	var diags diag.Diagnostics
+	assert.NotPanics(t, func() {
+		policy, diags = buildFlowControlPolicyAPIModel(ctx, plan)
+	})
+	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
+	assert.Nil(t, policy.Key, "key should be left unset when the collection is unknown")
+	assert.Nil(t, policy.Steps, "steps should be left unset when the collection is unknown")
 }

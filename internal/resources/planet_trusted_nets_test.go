@@ -8,6 +8,7 @@ import (
 
 	rschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -197,6 +198,53 @@ func TestTrustedNetsConfigValidator_ValidateResource(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTrustedNetsConfigValidator_ValidateResource_UnknownCollection reproduces
+// the crash scenario: a `dynamic "trusted_nets"` block whose for_each
+// cannot be resolved at plan time makes the whole `trusted_nets` collection
+// unknown (not just individual elements, which is already covered above by the
+// "unknown source/address/gf_id" cases). The validator must defer instead of
+// erroring or panicking on the unknown collection.
+func TestTrustedNetsConfigValidator_ValidateResource_UnknownCollection(t *testing.T) {
+	r := &PlanetTrustedNetsResource{}
+	v := &trustedNetsConfigValidator{}
+	ctx := context.Background()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id":    strVal("cfg1"),
+		"trusted_nets": tftypes.NewValue(trustedNetsListType, tftypes.UnknownValue),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		v.ValidateResource(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown trusted_nets collection should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestBuildPlanetBody_UnknownTrustedNets ensures the API-body builder
+// tolerates a wholly-unknown trusted_nets collection (as produced by an
+// unresolved `dynamic` block) without panicking. Only reachable at plan time;
+// by apply time Terraform guarantees fully known values.
+func TestBuildPlanetBody_UnknownTrustedNets(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &PlanetTrustedNetsResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		ID:          types.StringValue(defaultPlanetEntryID),
+		Name:        types.StringValue(defaultPlanetEntryID),
+		TrustedNets: types.ListUnknown(trustedNetModelType()),
+	}
+
+	var planet *client.Planet
+	var diags diag.Diagnostics
+	assert.NotPanics(t, func() {
+		planet, diags = buildPlanetBody(ctx, plan)
+	})
+	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
+	assert.Empty(t, planet.TrustedNets, "trusted nets should be empty when the collection is unknown")
 }
 
 func TestPlanetTrustedNetsResource_Configure_NilProvider(t *testing.T) {
