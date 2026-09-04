@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -25,6 +26,14 @@ var (
 	_ resource.Resource                = &CertificateResource{}
 	_ resource.ResourceWithImportState = &CertificateResource{}
 )
+
+// Number of extra read attempts (beyond the first) and the delay between
+// them when reading a certificate back right after creating it, to ride
+// out API read-after-write propagation delays. certificateCreateReadRetryDelay
+// is a var (not a const) so tests can shrink it to keep the suite fast.
+const certificateCreateReadMaxRetries = 3
+
+var certificateCreateReadRetryDelay = 500 * time.Millisecond
 
 // CertificateResource implements the certificate resource.
 type CertificateResource struct {
@@ -222,14 +231,39 @@ func (r *CertificateResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 
-	// Read back to get computed values
-	cert, err := r.client.GetCertificate(ctx, plan.ConfigID.ValueString(), plan.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Error Reading Certificate",
-			"Could not read certificate after creation: "+err.Error(),
-		)
-		return
+	// Read back to get computed values. The API can exhibit a brief
+	// read-after-write delay right after creation, so retry a few times
+	// before giving up.
+	var cert *client.Certificate
+	for attempt := 0; ; attempt++ {
+		cert, err = r.client.GetCertificate(ctx, plan.ConfigID.ValueString(), plan.ID.ValueString())
+		if err == nil {
+			break
+		}
+		if attempt >= certificateCreateReadMaxRetries {
+			// The certificate was created on the API side even though we
+			// can't read it back yet. Record its identifiers so Terraform
+			// tracks it (and reconciles via Read on the next plan) instead
+			// of creating a duplicate on the next apply.
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), plan.ConfigID)...)
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), plan.ID)...)
+			resp.Diagnostics.AddError(
+				"Error Reading Certificate",
+				"Could not read certificate after creation: "+err.Error(),
+			)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("config_id"), plan.ConfigID)...)
+			resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), plan.ID)...)
+			resp.Diagnostics.AddError(
+				"Error Reading Certificate",
+				"Could not read certificate after creation: "+ctx.Err().Error(),
+			)
+			return
+		case <-time.After(certificateCreateReadRetryDelay):
+		}
 	}
 
 	r.updateModelFromAPI(ctx, &plan, cert, &resp.Diagnostics)

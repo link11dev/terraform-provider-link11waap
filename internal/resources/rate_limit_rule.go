@@ -35,24 +35,29 @@ type RateLimitRuleResource struct {
 	client *client.Client
 }
 
-// RateLimitRuleResourceModel describes the resource model for a rate limit rule
+// RateLimitRuleResourceModel describes the resource model for a rate limit rule.
+//
+// Key is a types.List (not a native Go slice): the framework's
+// reflection-based decoding cannot represent an unknown value in a plain
+// slice, and Terraform produces unknown collections for blocks generated via
+// `dynamic`.
 type RateLimitRuleResourceModel struct {
-	ConfigID    types.String        `tfsdk:"config_id"`
-	ID          types.String        `tfsdk:"id"`
-	Name        types.String        `tfsdk:"name"`
-	Description types.String        `tfsdk:"description"`
-	Global      types.Bool          `tfsdk:"global"`
-	Active      types.Bool          `tfsdk:"active"`
-	Timeframe   types.Int64         `tfsdk:"timeframe"`
-	Threshold   types.Int64         `tfsdk:"threshold"`
-	TTL         types.Int64         `tfsdk:"ttl"`
-	Action      types.String        `tfsdk:"action"`
-	IsActionBan types.Bool          `tfsdk:"is_action_ban"`
-	Tags        types.List          `tfsdk:"tags"`
-	Key         []RateLimitKeyModel `tfsdk:"key"`
-	Pairwith    types.String        `tfsdk:"pairwith"`
-	Include     types.Object        `tfsdk:"include"`
-	Exclude     types.Object        `tfsdk:"exclude"`
+	ConfigID    types.String `tfsdk:"config_id"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Global      types.Bool   `tfsdk:"global"`
+	Active      types.Bool   `tfsdk:"active"`
+	Timeframe   types.Int64  `tfsdk:"timeframe"`
+	Threshold   types.Int64  `tfsdk:"threshold"`
+	TTL         types.Int64  `tfsdk:"ttl"`
+	Action      types.String `tfsdk:"action"`
+	IsActionBan types.Bool   `tfsdk:"is_action_ban"`
+	Tags        types.List   `tfsdk:"tags"`
+	Key         types.List   `tfsdk:"key"`
+	Pairwith    types.String `tfsdk:"pairwith"`
+	Include     types.Object `tfsdk:"include"`
+	Exclude     types.Object `tfsdk:"exclude"`
 	// LastActivated types.Int64         `tfsdk:"last_activated"`
 }
 
@@ -63,6 +68,27 @@ type RateLimitKeyModel struct {
 	Plugins types.String `tfsdk:"plugins"`
 	Cookies types.String `tfsdk:"cookies"`
 	Headers types.String `tfsdk:"headers"`
+}
+
+// rateLimitKeyModelType is the object type matching RateLimitKeyModel, used to convert
+// between types.List and []RateLimitKeyModel.
+func rateLimitKeyModelType() types.ObjectType {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"attrs":   types.StringType,
+		"args":    types.StringType,
+		"plugins": types.StringType,
+		"cookies": types.StringType,
+		"headers": types.StringType,
+	}}
+}
+
+// rateLimitKeyModelsToList converts []RateLimitKeyModel to a non-null types.List, treating
+// nil as empty (block collections are never null).
+func rateLimitKeyModelsToList(ctx context.Context, models []RateLimitKeyModel) (types.List, diag.Diagnostics) {
+	if models == nil {
+		models = []RateLimitKeyModel{}
+	}
+	return types.ListValueFrom(ctx, rateLimitKeyModelType(), models)
 }
 
 // RateLimitTagFilterModel describes the data model for a rate limit tag filter (include/exclude)
@@ -323,6 +349,8 @@ func (r *RateLimitRuleResource) UpgradeState(ctx context.Context) map[int64]reso
 				resp.Diagnostics.Append(diags...)
 				excludeObj, diags := tagFilterSetToObject(ctx, priorState.Exclude)
 				resp.Diagnostics.Append(diags...)
+				keyList, diags := rateLimitKeyModelsToList(ctx, priorState.Key)
+				resp.Diagnostics.Append(diags...)
 				if resp.Diagnostics.HasError() {
 					return
 				}
@@ -340,7 +368,7 @@ func (r *RateLimitRuleResource) UpgradeState(ctx context.Context) map[int64]reso
 					Action:      priorState.Action,
 					IsActionBan: priorState.IsActionBan,
 					Tags:        priorState.Tags,
-					Key:         priorState.Key,
+					Key:         keyList,
 					Pairwith:    priorState.Pairwith,
 					Include:     includeObj,
 					Exclude:     excludeObj,
@@ -421,8 +449,10 @@ func (r *RateLimitRuleResource) Read(ctx context.Context, req resource.ReadReque
 		state.Tags = types.ListNull(types.StringType)
 	}
 
-	// Key ([]interface{} -> []RateLimitKeyModel)
-	state.Key = parseRateLimitKeys(rule.Key)
+	// Key ([]interface{} -> []RateLimitKeyModel -> types.List)
+	keyList, diags := rateLimitKeyModelsToList(ctx, parseRateLimitKeys(rule.Key))
+	resp.Diagnostics.Append(diags...)
+	state.Key = keyList
 
 	// Pairwith (interface{} -> JSON string)
 	if rule.Pairwith != nil {
@@ -515,7 +545,17 @@ func (r *RateLimitRuleResource) ValidateConfig(ctx context.Context, req resource
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if len(config.Key) == 0 {
+	if config.Key.IsUnknown() {
+		return
+	}
+	var keys []RateLimitKeyModel
+	if !config.Key.IsNull() {
+		resp.Diagnostics.Append(config.Key.ElementsAs(ctx, &keys, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	if len(keys) == 0 {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("key"),
 			"Missing Required key Blocks",
@@ -523,7 +563,7 @@ func (r *RateLimitRuleResource) ValidateConfig(ctx context.Context, req resource
 		)
 		return
 	}
-	for i, k := range config.Key {
+	for i, k := range keys {
 		setCount := 0
 		if !k.Attrs.IsNull() && !k.Attrs.IsUnknown() {
 			setCount++
@@ -578,9 +618,13 @@ func buildRateLimitRuleAPIModel(ctx context.Context, plan *RateLimitRuleResource
 		diags.Append(plan.Tags.ElementsAs(ctx, &rule.Tags, false)...)
 	}
 
-	// Key ([]RateLimitKeyModel -> []map[string]string)
-	if len(plan.Key) > 0 {
-		rule.Key = buildRateLimitKeys(plan.Key)
+	// Key (types.List -> []RateLimitKeyModel -> []map[string]string)
+	if !plan.Key.IsNull() && !plan.Key.IsUnknown() {
+		var keys []RateLimitKeyModel
+		diags.Append(plan.Key.ElementsAs(ctx, &keys, false)...)
+		if len(keys) > 0 {
+			rule.Key = buildRateLimitKeys(keys)
+		}
 	}
 
 	// Pairwith (JSON string -> interface{})

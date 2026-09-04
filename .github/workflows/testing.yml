@@ -37,6 +37,15 @@ jobs:
         with:
           go-version: "1.25"
 
+      # terraform-plugin-testing looks for a Terraform CLI on PATH first and
+      # only falls back to downloading+GPG-verifying a release from
+      # releases.hashicorp.com if none is found. HashiCorp's old release
+      # signing key has since expired, which breaks that download fallback.
+      # Installing the CLI here keeps tests on the PATH lookup and avoids it.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
       - name: Test
         run: make test
 

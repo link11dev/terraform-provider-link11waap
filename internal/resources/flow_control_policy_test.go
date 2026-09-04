@@ -13,6 +13,7 @@ import (
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 	"github.com/link11/terraform-provider-link11waap/internal/providerutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func strPtr(s string) *string { return &s }
@@ -119,6 +120,56 @@ func TestBuildFlowControlKeys_AllKeyTypes(t *testing.T) {
 	}
 }
 
+// mustFlowControlKeyList builds a types.List of FlowControlKeyModel for use in
+// FlowControlPolicyResourceModel literals.
+func mustFlowControlKeyList(t *testing.T, keys []providerutil.FlowControlKeyModel) types.List {
+	t.Helper()
+	l, diags := types.ListValueFrom(context.Background(), providerutil.FlowControlKeyModelType(), keys)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return l
+}
+
+// mustFlowControlStepList builds a types.List of FlowControlStepModel for use in
+// FlowControlPolicyResourceModel literals.
+func mustFlowControlStepList(t *testing.T, steps []providerutil.FlowControlStepModel) types.List {
+	t.Helper()
+	l, diags := types.ListValueFrom(context.Background(), providerutil.FlowControlStepModelType(), steps)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return l
+}
+
+// flowControlKeysOf decodes a types.List of providerutil.FlowControlKeyModel for assertions.
+func flowControlKeysOf(t *testing.T, l types.List) []providerutil.FlowControlKeyModel {
+	t.Helper()
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []providerutil.FlowControlKeyModel
+	diags := l.ElementsAs(context.Background(), &models, false)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return models
+}
+
+// flowControlStepsOf decodes a types.List of providerutil.FlowControlStepModel for assertions.
+func flowControlStepsOf(t *testing.T, l types.List) []providerutil.FlowControlStepModel {
+	t.Helper()
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []providerutil.FlowControlStepModel
+	diags := l.ElementsAs(context.Background(), &models, false)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return models
+}
+
 func TestParseFlowControlKeys_AllKeyTypes(t *testing.T) {
 	entries := []client.FlowControlKeyEntry{
 		{Attrs: strPtr("session")},
@@ -127,7 +178,11 @@ func TestParseFlowControlKeys_AllKeyTypes(t *testing.T) {
 		{Cookies: strPtr("sid")},
 		{Headers: strPtr("x-key")},
 	}
-	result := providerutil.ParseFlowControlKeys(entries)
+	list, diags := providerutil.ParseFlowControlKeys(context.Background(), entries)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	result := flowControlKeysOf(t, list)
 	if len(result) != 5 {
 		t.Fatalf("expected 5 models, got %d", len(result))
 	}
@@ -156,7 +211,11 @@ func TestFlowControlKeys_RoundTrip(t *testing.T) {
 		{Attrs: strPtr("ip")},
 		{Cookies: strPtr("sid")},
 	}
-	parsed := providerutil.ParseFlowControlKeys(entries)
+	list, diags := providerutil.ParseFlowControlKeys(context.Background(), entries)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	parsed := flowControlKeysOf(t, list)
 	built := buildFlowControlKeys(parsed)
 	if len(built) != 2 {
 		t.Fatalf("expected 2, got %d", len(built))
@@ -209,11 +268,11 @@ func TestParseFlowControlSteps(t *testing.T) {
 	steps := []client.FlowStepItem{
 		{Method: "POST", URI: "/checkout", Args: map[string]string{"step": "2"}},
 	}
-	var diags diag.Diagnostics
-	result := providerutil.ParseFlowControlSteps(ctx, steps, &diags)
+	list, diags := providerutil.ParseFlowControlSteps(ctx, steps)
 	if diags.HasError() {
 		t.Fatalf("unexpected diags: %v", diags)
 	}
+	result := flowControlStepsOf(t, list)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(result))
 	}
@@ -262,12 +321,12 @@ func TestBuildFlowControlPolicyAPIModel_BasicFields(t *testing.T) {
 		Tags:        tags,
 		Include:     include,
 		Exclude:     types.ListNull(types.StringType),
-		Key: []providerutil.FlowControlKeyModel{
+		Key: mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
-		Steps: []providerutil.FlowControlStepModel{
+		}),
+		Steps: mustFlowControlStepList(t, []providerutil.FlowControlStepModel{
 			{Method: types.StringValue("GET"), URI: types.StringValue("/a"), Headers: types.MapNull(types.StringType), Cookies: types.MapNull(types.StringType), Args: types.MapNull(types.StringType), Plugins: types.MapNull(types.StringType)},
-		},
+		}),
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -308,8 +367,8 @@ func TestBuildFlowControlPolicyAPIModel_NonNullExclude(t *testing.T) {
 		Tags:        types.ListNull(types.StringType),
 		Include:     types.ListNull(types.StringType),
 		Exclude:     exclude,
-		Key:         []providerutil.FlowControlKeyModel{},
-		Steps:       []providerutil.FlowControlStepModel{},
+		Key:         mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{}),
+		Steps:       mustFlowControlStepList(t, []providerutil.FlowControlStepModel{}),
 		ConfigID:    types.StringValue("cfg1"),
 	}
 
@@ -369,11 +428,11 @@ func TestParseFlowControlSteps_AllMaps(t *testing.T) {
 			Plugins: map[string]string{"plugin-key": "plugin-val"},
 		},
 	}
-	var diags diag.Diagnostics
-	result := providerutil.ParseFlowControlSteps(ctx, steps, &diags)
+	list, diags := providerutil.ParseFlowControlSteps(ctx, steps)
 	if diags.HasError() {
 		t.Fatalf("unexpected diags: %v", diags)
 	}
+	result := flowControlStepsOf(t, list)
 	if len(result) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(result))
 	}
@@ -620,4 +679,59 @@ func TestFlowControlPolicyResource_ValidateConfig_NoSteps(t *testing.T) {
 	resp := &resource.ValidateConfigResponse{}
 	r.ValidateConfig(ctx, req, resp)
 	assert.True(t, resp.Diagnostics.HasError(), "empty steps list should produce error")
+}
+
+// TestFlowControlPolicyResource_ValidateConfig_UnknownKeyAndSteps reproduces the
+// crash scenario at the ValidateConfig layer: a `dynamic "key"`/`dynamic
+// "steps"` block whose for_each cannot be resolved at plan time makes the whole
+// `key`/`steps` collection unknown (not just individual elements). ValidateConfig
+// must defer validation instead of erroring or panicking.
+func TestFlowControlPolicyResource_ValidateConfig_UnknownKeyAndSteps(t *testing.T) {
+	ctx := context.Background()
+	r := &FlowControlPolicyResource{}
+	keyObjType := fcKeyObjType()
+	stepObjType := fcStepObjType()
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"key":   tftypes.NewValue(tftypes.List{ElementType: keyObjType}, tftypes.UnknownValue),
+		"steps": tftypes.NewValue(tftypes.List{ElementType: stepObjType}, tftypes.UnknownValue),
+	})
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown key/steps collections should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestBuildFlowControlPolicyAPIModel_UnknownKeyAndSteps ensures the API-model
+// builder tolerates a wholly-unknown key/steps collection (as produced by an
+// unresolved `dynamic` block) without panicking. This path is only reachable at
+// plan time (ValidateConfig); by apply time Terraform guarantees fully known
+// values, but the builder must not crash if invoked with unknowns.
+func TestBuildFlowControlPolicyAPIModel_UnknownKeyAndSteps(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &FlowControlPolicyResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Active:      types.BoolValue(true),
+		Timeframe:   types.Int64Value(60),
+		Tags:        types.ListNull(types.StringType),
+		Include:     types.ListNull(types.StringType),
+		Exclude:     types.ListNull(types.StringType),
+		Key:         types.ListUnknown(providerutil.FlowControlKeyModelType()),
+		Steps:       types.ListUnknown(providerutil.FlowControlStepModelType()),
+	}
+
+	var policy *client.FlowControl
+	var diags diag.Diagnostics
+	assert.NotPanics(t, func() {
+		policy, diags = buildFlowControlPolicyAPIModel(ctx, plan)
+	})
+	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
+	assert.Nil(t, policy.Key, "key should be left unset when the collection is unknown")
+	assert.Nil(t, policy.Steps, "steps should be left unset when the collection is unknown")
 }

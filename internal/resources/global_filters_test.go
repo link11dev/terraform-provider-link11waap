@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework-jsontypes/jsontypes"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -48,6 +49,48 @@ func newEntryValue(typ, value, comment string) tftypes.Value {
 		"value":   tftypes.NewValue(tftypes.String, value),
 		"comment": tftypes.NewValue(tftypes.String, comment),
 	})
+}
+
+// mustEntryList builds a types.List of EntryModel for use in RuleModel/GroupModel literals.
+// RuleModel.Entries and GroupModel.Entries are types.List (not native slices) so the
+// framework can represent unknown values produced by `dynamic` blocks.
+func mustEntryList(t *testing.T, entries []EntryModel) types.List {
+	t.Helper()
+	l, diags := entryModelsToList(context.Background(), entries)
+	require.False(t, diags.HasError(), "%v", diags)
+	return l
+}
+
+// mustGroupList builds a types.List of GroupModel for use in RuleModel literals.
+func mustGroupList(t *testing.T, groups []GroupModel) types.List {
+	t.Helper()
+	l, diags := groupModelsToList(context.Background(), groups)
+	require.False(t, diags.HasError(), "%v", diags)
+	return l
+}
+
+// entriesOf extracts []EntryModel from a types.List for assertions.
+func entriesOf(t *testing.T, l types.List) []EntryModel {
+	t.Helper()
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []EntryModel
+	diags := l.ElementsAs(context.Background(), &models, false)
+	require.False(t, diags.HasError(), "%v", diags)
+	return models
+}
+
+// groupsOf extracts []GroupModel from a types.List for assertions.
+func groupsOf(t *testing.T, l types.List) []GroupModel {
+	t.Helper()
+	if l.IsNull() || l.IsUnknown() {
+		return nil
+	}
+	var models []GroupModel
+	diags := l.ElementsAs(context.Background(), &models, false)
+	require.False(t, diags.HasError(), "%v", diags)
+	return models
 }
 
 // newRuleValue builds a tftypes value for the rule block given entries_json and entry blocks.
@@ -139,6 +182,66 @@ func TestGlobalFilterResource_ValidateConfig_MutualExclusion(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGlobalFilterResource_ValidateConfig_UnknownEntryAndGroup reproduces the
+// crash scenario: a `dynamic "entry"`/`dynamic "group"` block whose
+// for_each cannot be resolved at plan time makes the whole `entry`/`group`
+// collection unknown (not just individual elements' values). ValidateConfig
+// must defer validation (mutual-exclusion and group checks) instead of
+// erroring or panicking on the unknown collection.
+func TestGlobalFilterResource_ValidateConfig_UnknownEntryAndGroup(t *testing.T) {
+	r := &GlobalFilterResource{}
+	ctx := context.Background()
+
+	rule := tftypes.NewValue(ruleObjectType, map[string]tftypes.Value{
+		"relation":     tftypes.NewValue(tftypes.String, "OR"),
+		"entries_json": tftypes.NewValue(tftypes.String, nil),
+		"entry":        tftypes.NewValue(tftypes.List{ElementType: entryObjectType}, tftypes.UnknownValue),
+		"group":        tftypes.NewValue(tftypes.List{ElementType: groupObjectType}, tftypes.UnknownValue),
+	})
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id": tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":      tftypes.NewValue(tftypes.String, "test"),
+		"rule":      rule,
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown entry/group collections should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestRuleModelToAPI_UnknownEntryAndGroup ensures the API-model builder
+// tolerates a wholly-unknown entry/group collection (as produced by an
+// unresolved `dynamic` block) without panicking. Only reachable at plan time;
+// by apply time Terraform guarantees fully known values.
+func TestRuleModelToAPI_UnknownEntryAndGroup(t *testing.T) {
+	ctx := context.Background()
+
+	rule := &RuleModel{
+		Relation:    types.StringValue("OR"),
+		EntriesJSON: jsontypes.NewNormalizedNull(),
+		Entries:     types.ListUnknown(entryModelType()),
+		Groups:      types.ListUnknown(groupModelType()),
+	}
+
+	var api interface{}
+	var diags diag.Diagnostics
+	assert.NotPanics(t, func() {
+		api, diags = ruleModelToAPI(ctx, rule)
+	})
+	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
+
+	m, ok := api.(map[string]interface{})
+	require.True(t, ok, "expected map[string]interface{}, got %T", api)
+	entries, ok := m["entries"].([]interface{})
+	require.True(t, ok, "expected entries to be []interface{}, got %T", m["entries"])
+	assert.Empty(t, entries, "entries should be empty when both collections are unknown")
 }
 
 func TestGlobalFilterResource_ValidateConfig_NilRule(t *testing.T) {
@@ -276,14 +379,14 @@ func TestBuildGlobalFilterAPIModel(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		Rule: &RuleModel{
 			Relation: types.StringValue("OR"),
-			Entries: []EntryModel{
+			Entries: mustEntryList(t, []EntryModel{
 				{
 					Type:    types.StringValue("path"),
 					Name:    types.StringNull(),
 					Value:   types.StringValue("/api/"),
 					Comment: types.StringValue("API path"),
 				},
-			},
+			}),
 		},
 	}
 
@@ -328,14 +431,14 @@ func TestBuildGlobalFilterAPIModel_NamedEntry(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		Rule: &RuleModel{
 			Relation: types.StringValue("AND"),
-			Entries: []EntryModel{
+			Entries: mustEntryList(t, []EntryModel{
 				{
 					Type:    types.StringValue("headers"),
 					Name:    types.StringValue("content-type"),
 					Value:   types.StringValue("application/json"),
 					Comment: types.StringValue("JSON content type"),
 				},
-			},
+			}),
 		},
 	}
 
@@ -367,27 +470,27 @@ func TestBuildGlobalFilterAPIModel_WithGroups(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		Rule: &RuleModel{
 			Relation: types.StringValue("OR"),
-			Entries: []EntryModel{
+			Entries: mustEntryList(t, []EntryModel{
 				{
 					Type:    types.StringValue("path"),
 					Name:    types.StringNull(),
 					Value:   types.StringValue("/api/"),
 					Comment: types.StringValue(""),
 				},
-			},
-			Groups: []GroupModel{
+			}),
+			Groups: mustGroupList(t, []GroupModel{
 				{
 					Relation: types.StringValue("AND"),
-					Entries: []EntryModel{
+					Entries: mustEntryList(t, []EntryModel{
 						{
 							Type:    types.StringValue("asn"),
 							Name:    types.StringNull(),
 							Value:   types.StringValue("100"),
 							Comment: types.StringValue(""),
 						},
-					},
+					}),
 				},
-			},
+			}),
 		},
 	}
 
@@ -465,6 +568,7 @@ func TestGlobalFilterResource_Source_AlwaysSelfManaged(t *testing.T) {
 }
 
 func TestApiRuleToModel_SimpleEntries(t *testing.T) {
+	ctx := context.Background()
 	raw := map[string]interface{}{
 		"relation": "OR",
 		"entries": []interface{}{
@@ -473,22 +577,24 @@ func TestApiRuleToModel_SimpleEntries(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw, nil)
+	model, err := apiRuleToModel(ctx, raw, nil)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
 	assert.Equal(t, "OR", model.Relation.ValueString())
-	require.Len(t, model.Entries, 2)
-	assert.Equal(t, "path", model.Entries[0].Type.ValueString())
-	assert.Equal(t, "/api/", model.Entries[0].Value.ValueString())
-	assert.Equal(t, "API path", model.Entries[0].Comment.ValueString())
-	assert.True(t, model.Entries[0].Name.IsNull())
+	entries := entriesOf(t, model.Entries)
+	require.Len(t, entries, 2)
+	assert.Equal(t, "path", entries[0].Type.ValueString())
+	assert.Equal(t, "/api/", entries[0].Value.ValueString())
+	assert.Equal(t, "API path", entries[0].Comment.ValueString())
+	assert.True(t, entries[0].Name.IsNull())
 
-	assert.Equal(t, "asn", model.Entries[1].Type.ValueString())
-	assert.Equal(t, "100", model.Entries[1].Value.ValueString())
+	assert.Equal(t, "asn", entries[1].Type.ValueString())
+	assert.Equal(t, "100", entries[1].Value.ValueString())
 }
 
 func TestApiRuleToModel_NamedEntry(t *testing.T) {
+	ctx := context.Background()
 	raw := map[string]interface{}{
 		"relation": "AND",
 		"entries": []interface{}{
@@ -496,11 +602,12 @@ func TestApiRuleToModel_NamedEntry(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw, nil)
+	model, err := apiRuleToModel(ctx, raw, nil)
 	require.NoError(t, err)
-	require.Len(t, model.Entries, 1)
+	entries := entriesOf(t, model.Entries)
+	require.Len(t, entries, 1)
 
-	entry := model.Entries[0]
+	entry := entries[0]
 	assert.Equal(t, "headers", entry.Type.ValueString())
 	assert.Equal(t, "content-type", entry.Name.ValueString())
 	assert.Equal(t, "application/json", entry.Value.ValueString())
@@ -508,6 +615,7 @@ func TestApiRuleToModel_NamedEntry(t *testing.T) {
 }
 
 func TestApiRuleToModel_WithGroup(t *testing.T) {
+	ctx := context.Background()
 	raw := map[string]interface{}{
 		"relation": "OR",
 		"entries": []interface{}{
@@ -522,35 +630,38 @@ func TestApiRuleToModel_WithGroup(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw, nil)
+	model, err := apiRuleToModel(ctx, raw, nil)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
 	assert.Equal(t, "OR", model.Relation.ValueString())
-	require.Len(t, model.Entries, 1)
-	require.Len(t, model.Groups, 1)
+	entries := entriesOf(t, model.Entries)
+	require.Len(t, entries, 1)
+	groups := groupsOf(t, model.Groups)
+	require.Len(t, groups, 1)
 
-	group := model.Groups[0]
+	group := groups[0]
 	assert.Equal(t, "AND", group.Relation.ValueString())
-	require.Len(t, group.Entries, 2)
+	groupEntries := entriesOf(t, group.Entries)
+	require.Len(t, groupEntries, 2)
 
-	assert.Equal(t, "asn", group.Entries[0].Type.ValueString())
-	assert.Equal(t, "100", group.Entries[0].Value.ValueString())
+	assert.Equal(t, "asn", groupEntries[0].Type.ValueString())
+	assert.Equal(t, "100", groupEntries[0].Value.ValueString())
 
-	assert.Equal(t, "cookies", group.Entries[1].Type.ValueString())
-	assert.Equal(t, "session", group.Entries[1].Name.ValueString())
-	assert.Equal(t, "abc", group.Entries[1].Value.ValueString())
-	assert.Equal(t, "session cookie", group.Entries[1].Comment.ValueString())
+	assert.Equal(t, "cookies", groupEntries[1].Type.ValueString())
+	assert.Equal(t, "session", groupEntries[1].Name.ValueString())
+	assert.Equal(t, "abc", groupEntries[1].Value.ValueString())
+	assert.Equal(t, "session cookie", groupEntries[1].Comment.ValueString())
 }
 
 func TestApiRuleToModel_Nil(t *testing.T) {
-	model, err := apiRuleToModel(nil, nil)
+	model, err := apiRuleToModel(context.Background(), nil, nil)
 	require.NoError(t, err)
 	assert.Nil(t, model)
 }
 
 func TestApiRuleToModel_InvalidType(t *testing.T) {
-	_, err := apiRuleToModel("not a map", nil)
+	_, err := apiRuleToModel(context.Background(), "not a map", nil)
 	assert.Error(t, err)
 }
 
@@ -560,9 +671,10 @@ func TestApiEntryToModel_TooFewElements(t *testing.T) {
 }
 
 func TestRuleRoundTrip(t *testing.T) {
+	ctx := context.Background()
 	original := &RuleModel{
 		Relation: types.StringValue("OR"),
-		Entries: []EntryModel{
+		Entries: mustEntryList(t, []EntryModel{
 			{
 				Type:    types.StringValue("path"),
 				Name:    types.StringNull(),
@@ -575,50 +687,53 @@ func TestRuleRoundTrip(t *testing.T) {
 				Value:   types.StringValue("application/json"),
 				Comment: types.StringValue(""),
 			},
-		},
-		Groups: []GroupModel{
+		}),
+		Groups: mustGroupList(t, []GroupModel{
 			{
 				Relation: types.StringValue("AND"),
-				Entries: []EntryModel{
+				Entries: mustEntryList(t, []EntryModel{
 					{
 						Type:    types.StringValue("asn"),
 						Name:    types.StringNull(),
 						Value:   types.StringValue("100"),
 						Comment: types.StringValue(""),
 					},
-				},
+				}),
 			},
-		},
+		}),
 	}
 
 	// Convert to API format
-	apiData, apiDiags := ruleModelToAPI(original)
+	apiData, apiDiags := ruleModelToAPI(ctx, original)
 	require.False(t, apiDiags.HasError())
 	require.NotNil(t, apiData)
 
 	// Convert back to model
-	result, err := apiRuleToModel(apiData, nil)
+	result, err := apiRuleToModel(ctx, apiData, nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
 	assert.Equal(t, original.Relation.ValueString(), result.Relation.ValueString())
-	require.Len(t, result.Entries, 2)
-	require.Len(t, result.Groups, 1)
+	entries := entriesOf(t, result.Entries)
+	groups := groupsOf(t, result.Groups)
+	require.Len(t, entries, 2)
+	require.Len(t, groups, 1)
 
 	// Verify simple entry round-trips
-	assert.Equal(t, "path", result.Entries[0].Type.ValueString())
-	assert.Equal(t, "/api/", result.Entries[0].Value.ValueString())
-	assert.True(t, result.Entries[0].Name.IsNull())
+	assert.Equal(t, "path", entries[0].Type.ValueString())
+	assert.Equal(t, "/api/", entries[0].Value.ValueString())
+	assert.True(t, entries[0].Name.IsNull())
 
 	// Verify named entry round-trips
-	assert.Equal(t, "headers", result.Entries[1].Type.ValueString())
-	assert.Equal(t, "content-type", result.Entries[1].Name.ValueString())
-	assert.Equal(t, "application/json", result.Entries[1].Value.ValueString())
+	assert.Equal(t, "headers", entries[1].Type.ValueString())
+	assert.Equal(t, "content-type", entries[1].Name.ValueString())
+	assert.Equal(t, "application/json", entries[1].Value.ValueString())
 
 	// Verify group round-trips
-	assert.Equal(t, "AND", result.Groups[0].Relation.ValueString())
-	require.Len(t, result.Groups[0].Entries, 1)
-	assert.Equal(t, "asn", result.Groups[0].Entries[0].Type.ValueString())
+	assert.Equal(t, "AND", groups[0].Relation.ValueString())
+	groupEntries := entriesOf(t, groups[0].Entries)
+	require.Len(t, groupEntries, 1)
+	assert.Equal(t, "asn", groupEntries[0].Type.ValueString())
 }
 
 func TestRuleModelToAPI_EntriesJSON(t *testing.T) {
@@ -627,7 +742,7 @@ func TestRuleModelToAPI_EntriesJSON(t *testing.T) {
 		EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/api/","API path"],["ip","203.0.113.0/24","Suspicious subnet"]]`),
 	}
 
-	apiData, diags := ruleModelToAPI(rule)
+	apiData, diags := ruleModelToAPI(context.Background(), rule)
 	require.False(t, diags.HasError())
 	require.NotNil(t, apiData)
 
@@ -658,7 +773,7 @@ func TestRuleModelToAPI_EntriesJSON_EmptyArray(t *testing.T) {
 		EntriesJSON: jsontypes.NewNormalizedValue(`[]`),
 	}
 
-	apiData, diags := ruleModelToAPI(rule)
+	apiData, diags := ruleModelToAPI(context.Background(), rule)
 	require.False(t, diags.HasError())
 
 	ruleMap := apiData.(map[string]interface{})
@@ -673,7 +788,7 @@ func TestRuleModelToAPI_EntriesJSON_Invalid(t *testing.T) {
 		EntriesJSON: jsontypes.NewNormalizedValue(`not valid json`),
 	}
 
-	apiData, diags := ruleModelToAPI(rule)
+	apiData, diags := ruleModelToAPI(context.Background(), rule)
 	assert.True(t, diags.HasError(), "invalid entries_json should produce a diagnostic")
 	assert.Nil(t, apiData)
 }
@@ -812,17 +927,17 @@ func TestRuleModelToAPI_EntriesJSON_EmptyStringUsesBlocks(t *testing.T) {
 	rule := &RuleModel{
 		Relation:    types.StringValue("OR"),
 		EntriesJSON: jsontypes.NewNormalizedValue(""),
-		Entries: []EntryModel{
+		Entries: mustEntryList(t, []EntryModel{
 			{
 				Type:    types.StringValue("path"),
 				Name:    types.StringNull(),
 				Value:   types.StringValue("/api/"),
 				Comment: types.StringValue(""),
 			},
-		},
+		}),
 	}
 
-	apiData, diags := ruleModelToAPI(rule)
+	apiData, diags := ruleModelToAPI(context.Background(), rule)
 	require.False(t, diags.HasError())
 
 	ruleMap := apiData.(map[string]interface{})
@@ -833,7 +948,7 @@ func TestRuleModelToAPI_EntriesJSON_EmptyStringUsesBlocks(t *testing.T) {
 }
 
 func TestRuleModelToAPI_NilRule(t *testing.T) {
-	apiData, diags := ruleModelToAPI(nil)
+	apiData, diags := ruleModelToAPI(context.Background(), nil)
 	require.False(t, diags.HasError())
 	assert.Nil(t, apiData)
 }
@@ -856,13 +971,13 @@ func TestApiRuleToModel_PriorUsedJSON(t *testing.T) {
 		EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/api/","API path"]]`),
 	}
 
-	model, err := apiRuleToModel(raw, prior)
+	model, err := apiRuleToModel(context.Background(), raw, prior)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
 	// Block fields should be empty; entries_json should be populated.
-	assert.Empty(t, model.Entries)
-	assert.Empty(t, model.Groups)
+	assert.Empty(t, entriesOf(t, model.Entries))
+	assert.Empty(t, groupsOf(t, model.Groups))
 	assert.False(t, model.EntriesJSON.IsNull())
 
 	// entries_json should semantically match the API entries array.
@@ -881,12 +996,12 @@ func TestApiRuleToModel_PriorUsedJSON_EmptyEntries(t *testing.T) {
 		EntriesJSON: jsontypes.NewNormalizedValue(`[]`),
 	}
 
-	model, err := apiRuleToModel(raw, prior)
+	model, err := apiRuleToModel(context.Background(), raw, prior)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
-	assert.Empty(t, model.Entries)
-	assert.Empty(t, model.Groups)
+	assert.Empty(t, entriesOf(t, model.Entries))
+	assert.Empty(t, groupsOf(t, model.Groups))
 	assert.Equal(t, "[]", model.EntriesJSON.ValueString())
 }
 
@@ -898,12 +1013,12 @@ func TestApiRuleToModel_PriorNilUsesBlocks(t *testing.T) {
 		},
 	}
 
-	model, err := apiRuleToModel(raw, nil)
+	model, err := apiRuleToModel(context.Background(), raw, nil)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
 	// With nil prior, block representation is used and entries_json stays null.
-	require.Len(t, model.Entries, 1)
+	require.Len(t, entriesOf(t, model.Entries), 1)
 	assert.True(t, model.EntriesJSON.IsNull())
 }
 
@@ -917,11 +1032,11 @@ func TestApiRuleToModel_PriorNoJSONUsesBlocks(t *testing.T) {
 
 	prior := &RuleModel{EntriesJSON: jsontypes.NewNormalizedNull()}
 
-	model, err := apiRuleToModel(raw, prior)
+	model, err := apiRuleToModel(context.Background(), raw, prior)
 	require.NoError(t, err)
 	require.NotNil(t, model)
 
-	require.Len(t, model.Entries, 1)
+	require.Len(t, entriesOf(t, model.Entries), 1)
 	assert.True(t, model.EntriesJSON.IsNull())
 }
 
@@ -972,14 +1087,14 @@ func TestBuildGlobalFilterAPIModel_CookiesNamedEntry(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		Rule: &RuleModel{
 			Relation: types.StringValue("OR"),
-			Entries: []EntryModel{
+			Entries: mustEntryList(t, []EntryModel{
 				{
 					Type:    types.StringValue("cookies"),
 					Name:    types.StringValue("test"),
 					Value:   types.StringValue("ddddd"),
 					Comment: types.StringValue("dddd"),
 				},
-			},
+			}),
 		},
 	}
 
@@ -1011,12 +1126,13 @@ func TestBuildGlobalFilterAPIModel_GroupWithEntriesJSON(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		Rule: &RuleModel{
 			Relation: types.StringValue("AND"),
-			Groups: []GroupModel{
+			Groups: mustGroupList(t, []GroupModel{
 				{
 					Relation:    types.StringValue("OR"),
+					Entries:     types.ListNull(entryModelType()),
 					EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/admin/","Admin paths"],["uri","/.+\\.php","PHP files"]]`),
 				},
-			},
+			}),
 		},
 	}
 
@@ -1056,21 +1172,23 @@ func TestApiRuleToModel_GroupPriorUsedJSON(t *testing.T) {
 
 	prior := &RuleModel{
 		Relation: types.StringValue("AND"),
-		Groups: []GroupModel{
+		Groups: mustGroupList(t, []GroupModel{
 			{
 				Relation:    types.StringValue("OR"),
+				Entries:     types.ListNull(entryModelType()),
 				EntriesJSON: jsontypes.NewNormalizedValue(`[["path","/old/",""]]`),
 			},
-		},
+		}),
 	}
 
-	model, err := apiRuleToModel(raw, prior)
+	model, err := apiRuleToModel(context.Background(), raw, prior)
 	require.NoError(t, err)
-	require.Len(t, model.Groups, 1)
+	groups := groupsOf(t, model.Groups)
+	require.Len(t, groups, 1)
 
-	g := model.Groups[0]
+	g := groups[0]
 	assert.Equal(t, "OR", g.Relation.ValueString())
-	assert.Empty(t, g.Entries)
+	assert.Empty(t, entriesOf(t, g.Entries))
 	assert.False(t, g.EntriesJSON.IsNull())
 
 	expected := jsontypes.NewNormalizedValue(`[["path","/admin/","Admin paths"],["uri","/.+\\.php","PHP files"]]`)
@@ -1094,22 +1212,25 @@ func TestApiRuleToModel_GroupPriorUsedBlocksKeepsBlocks(t *testing.T) {
 
 	prior := &RuleModel{
 		Relation: types.StringValue("AND"),
-		Groups: []GroupModel{
+		Groups: mustGroupList(t, []GroupModel{
 			{
 				Relation:    types.StringValue("OR"),
+				Entries:     types.ListNull(entryModelType()),
 				EntriesJSON: jsontypes.NewNormalizedNull(),
 			},
-		},
+		}),
 	}
 
-	model, err := apiRuleToModel(raw, prior)
+	model, err := apiRuleToModel(context.Background(), raw, prior)
 	require.NoError(t, err)
-	require.Len(t, model.Groups, 1)
+	groups := groupsOf(t, model.Groups)
+	require.Len(t, groups, 1)
 
-	g := model.Groups[0]
+	g := groups[0]
 	assert.True(t, g.EntriesJSON.IsNull())
-	require.Len(t, g.Entries, 1)
-	assert.Equal(t, "path", g.Entries[0].Type.ValueString())
+	gEntries := entriesOf(t, g.Entries)
+	require.Len(t, gEntries, 1)
+	assert.Equal(t, "path", gEntries[0].Type.ValueString())
 }
 
 func TestGlobalFilterResource_ValidateConfig_GroupMutualExclusion(t *testing.T) {

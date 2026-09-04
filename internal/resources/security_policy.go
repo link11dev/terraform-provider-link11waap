@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -23,21 +25,32 @@ var (
 	_ resource.ResourceWithModifyPlan     = &SecurityPolicyResource{}
 )
 
+// siteLevelMapID is the well-known ID of the server-managed map entry. It is
+// always present on the server; users may only control its rate_limit_rules
+// and edge_functions fields via config, everything else is resolved from prior
+// state (or defaultSiteLevelMap when there is none). See resolveSiteLevelMap.
+const siteLevelMapID = "__site_level__"
+
 // SecurityPolicyResource implements the security policy resource.
 type SecurityPolicyResource struct {
 	client *client.Client
 }
 
 // SecurityPolicyResourceModel describes the security policy resource data model.
+//
+// Map, Session, and SessionIDs are types.Set/types.List (not native Go
+// slices): the framework's reflection-based decoding cannot represent an
+// unknown value in a plain slice, and Terraform produces unknown collections
+// for blocks generated via `dynamic`.
 type SecurityPolicyResourceModel struct {
-	ConfigID    types.String         `tfsdk:"config_id"`
-	ID          types.String         `tfsdk:"id"`
-	Name        types.String         `tfsdk:"name"`
-	Description types.String         `tfsdk:"description"`
-	Tags        types.List           `tfsdk:"tags"`
-	Map         []SecProfileMapModel `tfsdk:"map"`
-	Session     []SessionKeyModel    `tfsdk:"session"`
-	SessionIDs  []SessionKeyModel    `tfsdk:"session_ids"`
+	ConfigID    types.String `tfsdk:"config_id"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Tags        types.List   `tfsdk:"tags"`
+	Map         types.Set    `tfsdk:"map"`
+	Session     types.List   `tfsdk:"session"`
+	SessionIDs  types.List   `tfsdk:"session_ids"`
 }
 
 // SessionKeyModel describes the data model for a session key entry.
@@ -62,6 +75,54 @@ type SecProfileMapModel struct {
 	Description                types.String `tfsdk:"description"`
 	RateLimitRules             types.List   `tfsdk:"rate_limit_rules"`
 	EdgeFunctions              types.List   `tfsdk:"edge_functions"`
+}
+
+// sessionKeyModelType is the object type matching SessionKeyModel, used to
+// convert between types.List and []SessionKeyModel.
+func sessionKeyModelType() types.ObjectType {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"attrs":   types.StringType,
+		"args":    types.StringType,
+		"plugins": types.StringType,
+		"cookies": types.StringType,
+		"headers": types.StringType,
+	}}
+}
+
+// sessionKeyModelsToList converts []SessionKeyModel to a non-null types.List,
+// treating nil as empty (block collections are never null).
+func sessionKeyModelsToList(ctx context.Context, models []SessionKeyModel) (types.List, diag.Diagnostics) {
+	if models == nil {
+		models = []SessionKeyModel{}
+	}
+	return types.ListValueFrom(ctx, sessionKeyModelType(), models)
+}
+
+// secProfileMapModelType is the object type matching SecProfileMapModel, used
+// to convert between types.Set and []SecProfileMapModel.
+func secProfileMapModelType() types.ObjectType {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"id":                            types.StringType,
+		"name":                          types.StringType,
+		"match":                         types.StringType,
+		"acl_profile":                   types.StringType,
+		"acl_profile_active":            types.BoolType,
+		"content_filter_profile":        types.StringType,
+		"content_filter_profile_active": types.BoolType,
+		"backend_service":               types.StringType,
+		"description":                   types.StringType,
+		"rate_limit_rules":              types.ListType{ElemType: types.StringType},
+		"edge_functions":                types.ListType{ElemType: types.StringType},
+	}}
+}
+
+// secProfileMapModelsToSet converts []SecProfileMapModel to a non-null
+// types.Set, treating nil as empty (block collections are never null).
+func secProfileMapModelsToSet(ctx context.Context, models []SecProfileMapModel) (types.Set, diag.Diagnostics) {
+	if models == nil {
+		models = []SecProfileMapModel{}
+	}
+	return types.SetValueFrom(ctx, secProfileMapModelType(), models)
 }
 
 // NewSecurityPolicyResource creates a new security policy resource instance.
@@ -119,35 +180,42 @@ func (r *SecurityPolicyResource) Schema(_ context.Context, _ resource.SchemaRequ
 							Required:    true,
 						},
 						"name": schema.StringAttribute{
-							Description: "Map entry name.",
-							Required:    true,
+							Description: "Map entry name. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"match": schema.StringAttribute{
-							Description: "Match expression (path/header matching).",
-							Required:    true,
+							Description: "Match expression (path/header matching). Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"acl_profile": schema.StringAttribute{
-							Description: "ID of the ACL profile to apply.",
-							Required:    true,
+							Description: "ID of the ACL profile to apply. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"acl_profile_active": schema.BoolAttribute{
-							Description: "Whether the ACL profile is active.",
-							Required:    true,
+							Description: "Whether the ACL profile is active. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"content_filter_profile": schema.StringAttribute{
-							Description: "ID of the content filter profile to apply.",
-							Required:    true,
+							Description: "ID of the content filter profile to apply. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"content_filter_profile_active": schema.BoolAttribute{
-							Description: "Whether the content filter profile is active.",
-							Required:    true,
+							Description: "Whether the content filter profile is active. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"backend_service": schema.StringAttribute{
-							Description: "ID of the backend service.",
-							Required:    true,
+							Description: "ID of the backend service. Required for every entry except \"__site_level__\", which must leave it unset.",
+							Optional:    true,
+							Computed:    true,
 						},
 						"description": schema.StringAttribute{
-							Description: "Description of the map entry.",
+							Description: "Description of the map entry. Must be left unset for \"__site_level__\".",
 							Optional:    true,
 							Computed:    true,
 							Default:     stringdefault.StaticString(""),
@@ -206,52 +274,154 @@ func (r *SecurityPolicyResource) ValidateConfig(ctx context.Context, req resourc
 		return
 	}
 
-	// session must have exactly one block
-	if len(config.Session) != 1 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("session"),
-			"Invalid session Configuration",
-			"Exactly one 'session' block must be specified.",
-		)
-		return
-	}
+	// session must have exactly one block. Skip entirely when the collection
+	// is unknown (e.g. produced by a `dynamic` block whose instances aren't
+	// yet resolvable) rather than erroring on it.
+	if !config.Session.IsUnknown() {
+		var sessions []SessionKeyModel
+		if !config.Session.IsNull() {
+			resp.Diagnostics.Append(config.Session.ElementsAs(ctx, &sessions, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
 
-	// Validate each session entry has exactly one field set
-	for i, s := range config.Session {
-		setCount := countSessionKeyFields(s)
-		if setCount != 1 {
+		if len(sessions) != 1 {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("session").AtListIndex(i),
-				"Invalid session block",
-				"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'session' block.",
+				path.Root("session"),
+				"Invalid session Configuration",
+				"Exactly one 'session' block must be specified.",
 			)
+			return
+		}
+
+		// Validate each session entry has exactly one field set
+		for i, s := range sessions {
+			setCount := countSessionKeyFields(s)
+			if setCount != 1 {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("session").AtListIndex(i),
+					"Invalid session block",
+					"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'session' block.",
+				)
+			}
 		}
 	}
 
 	// Validate each session_ids entry has exactly one field set
-	for i, s := range config.SessionIDs {
-		setCount := countSessionKeyFields(s)
-		if setCount != 1 {
-			resp.Diagnostics.AddAttributeError(
-				path.Root("session_ids").AtListIndex(i),
-				"Invalid session_ids block",
-				"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'session_ids' block.",
-			)
+	if !config.SessionIDs.IsUnknown() {
+		var sessionIDs []SessionKeyModel
+		if !config.SessionIDs.IsNull() {
+			resp.Diagnostics.Append(config.SessionIDs.ElementsAs(ctx, &sessionIDs, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+
+		for i, s := range sessionIDs {
+			setCount := countSessionKeyFields(s)
+			if setCount != 1 {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("session_ids").AtListIndex(i),
+					"Invalid session_ids block",
+					"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'session_ids' block.",
+				)
+			}
+		}
+	}
+
+	// Validate field presence rules for each map entry: the site-level entry
+	// may only set id, rate_limit_rules, and edge_functions; every other entry
+	// must set all of the remaining fields.
+	if !config.Map.IsUnknown() {
+		var maps []SecProfileMapModel
+		if !config.Map.IsNull() {
+			resp.Diagnostics.Append(config.Map.ElementsAs(ctx, &maps, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+
+		for _, m := range maps {
+			if m.ID.IsUnknown() {
+				continue
+			}
+			for _, msg := range validateSecProfileMapEntry(m) {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("map"),
+					"Invalid Security Profile Map Entry",
+					msg,
+				)
+			}
 		}
 	}
 }
 
-// ModifyPlan ensures that server-managed default maps (like __site_level__) are preserved
-// in the plan when they exist in the prior state, preventing spurious diffs.
-func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
-	// Only handle updates: both state and plan must exist.
-	if req.Plan.Raw.IsNull() || req.State.Raw.IsNull() {
-		return
+// validateSecProfileMapEntry checks the field-presence rules for a single map
+// entry and returns human-readable error messages for any violations. The
+// "__site_level__" entry is server-managed and may only set id,
+// rate_limit_rules, and edge_functions; every other entry must set all of
+// name, match, acl_profile, acl_profile_active, content_filter_profile,
+// content_filter_profile_active, and backend_service.
+func validateSecProfileMapEntry(m SecProfileMapModel) []string {
+	type check struct {
+		field string
+		bad   bool
 	}
 
-	var state SecurityPolicyResourceModel
-	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
-	if resp.Diagnostics.HasError() {
+	var errs []string
+
+	if m.ID.ValueString() == siteLevelMapID {
+		forbidden := []check{
+			{"name", !m.Name.IsNull()},
+			{"match", !m.Match.IsNull()},
+			{"acl_profile", !m.ACLProfile.IsNull()},
+			{"acl_profile_active", !m.ACLProfileActive.IsNull()},
+			{"content_filter_profile", !m.ContentFilterProfile.IsNull()},
+			{"content_filter_profile_active", !m.ContentFilterProfileActive.IsNull()},
+			{"backend_service", !m.BackendService.IsNull()},
+			{"description", !m.Description.IsNull()},
+		}
+		for _, c := range forbidden {
+			if c.bad {
+				errs = append(errs, fmt.Sprintf(
+					"map entry %q may only set id, rate_limit_rules, and edge_functions; remove %q, it is locked to a server-managed baseline",
+					siteLevelMapID, c.field,
+				))
+			}
+		}
+		return errs
+	}
+
+	required := []check{
+		{"name", m.Name.IsNull()},
+		{"match", m.Match.IsNull()},
+		{"acl_profile", m.ACLProfile.IsNull()},
+		{"acl_profile_active", m.ACLProfileActive.IsNull()},
+		{"content_filter_profile", m.ContentFilterProfile.IsNull()},
+		{"content_filter_profile_active", m.ContentFilterProfileActive.IsNull()},
+		{"backend_service", m.BackendService.IsNull()},
+	}
+	for _, c := range required {
+		if c.bad {
+			errs = append(errs, fmt.Sprintf(
+				"map entry %q is missing required field %q",
+				m.ID.ValueString(), c.field,
+			))
+		}
+	}
+	return errs
+}
+
+// ModifyPlan ensures the server-managed "__site_level__" map entry is always present
+// in the plan. Because this entry may be managed outside of Terraform (e.g. via the
+// API/UI), its fields are carried forward from prior state whenever it already exists
+// there, rather than being forced back to the hardcoded baseline — only a brand-new
+// entry (no prior state, e.g. initial create) gets the hardcoded baseline. The user may
+// still explicitly manage rate_limit_rules/edge_functions by setting them in config.
+func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// Skip on destroy, where there is no plan to modify.
+	if req.Plan.Raw.IsNull() {
 		return
 	}
 
@@ -261,11 +431,45 @@ func (r *SecurityPolicyResource) ModifyPlan(ctx context.Context, req resource.Mo
 		return
 	}
 
-	merged := mergeDefaultMaps(state.Map, plan.Map)
-	if merged != nil {
-		plan.Map = merged
-		resp.Diagnostics.Append(resp.Plan.Set(ctx, plan)...)
+	// The map collection may be unknown (e.g. produced by a `dynamic` block
+	// whose instances aren't yet resolvable); defer resolution to a later
+	// plan cycle instead of erroring on it.
+	if plan.Map.IsUnknown() {
+		return
 	}
+
+	var planMaps []SecProfileMapModel
+	if !plan.Map.IsNull() {
+		resp.Diagnostics.Append(plan.Map.ElementsAs(ctx, &planMaps, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	var priorMaps []SecProfileMapModel
+	if !req.State.Raw.IsNull() {
+		var state SecurityPolicyResourceModel
+		resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if !state.Map.IsNull() && !state.Map.IsUnknown() {
+			resp.Diagnostics.Append(state.Map.ElementsAs(ctx, &priorMaps, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+	}
+
+	resolvedMaps := resolveSiteLevelMap(planMaps, priorMaps)
+	mapSet, diags := secProfileMapModelsToSet(ctx, resolvedMaps)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	plan.Map = mapSet
+
+	resp.Diagnostics.Append(resp.Plan.Set(ctx, plan)...)
 }
 
 // countSessionKeyFields counts the number of non-null, non-unknown fields in a SessionKeyModel.
@@ -299,7 +503,11 @@ func (r *SecurityPolicyResource) Create(ctx context.Context, req resource.Create
 
 	plan.ID = types.StringValue(generateID())
 
-	sp := buildSecurityPolicyAPIModel(ctx, &plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	err := r.client.CreateSecurityPolicy(ctx, plan.ConfigID.ValueString(), plan.ID.ValueString(), sp)
 	if err != nil {
@@ -347,17 +555,21 @@ func (r *SecurityPolicyResource) Read(ctx context.Context, req resource.ReadRequ
 	}
 
 	// Session
-	state.Session = parseSessionKeys(sp.Session)
+	sessionList, diags := sessionKeyModelsToList(ctx, parseSessionKeys(sp.Session))
+	resp.Diagnostics.Append(diags...)
+	state.Session = sessionList
 
 	// SessionIDs
+	var sessionIDModels []SessionKeyModel
 	if sp.SessionIDs != nil {
-		state.SessionIDs = parseSessionKeys(sp.SessionIDs)
-	} else {
-		state.SessionIDs = []SessionKeyModel{}
+		sessionIDModels = parseSessionKeys(sp.SessionIDs)
 	}
+	sessionIDsList, diags := sessionKeyModelsToList(ctx, sessionIDModels)
+	resp.Diagnostics.Append(diags...)
+	state.SessionIDs = sessionIDsList
 
 	// Map
-	state.Map = make([]SecProfileMapModel, len(sp.Map))
+	mapModels := make([]SecProfileMapModel, len(sp.Map))
 	for i, m := range sp.Map {
 		mapModel := SecProfileMapModel{
 			ID:                         types.StringValue(m.ID),
@@ -388,8 +600,11 @@ func (r *SecurityPolicyResource) Read(ctx context.Context, req resource.ReadRequ
 		} else {
 			mapModel.EdgeFunctions = types.ListNull(types.StringType)
 		}
-		state.Map[i] = mapModel
+		mapModels[i] = mapModel
 	}
+	mapSet, diags := secProfileMapModelsToSet(ctx, mapModels)
+	resp.Diagnostics.Append(diags...)
+	state.Map = mapSet
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -402,7 +617,11 @@ func (r *SecurityPolicyResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, &plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	err := r.client.UpdateSecurityPolicy(ctx, plan.ConfigID.ValueString(), plan.ID.ValueString(), sp)
 	if err != nil {
@@ -450,7 +669,9 @@ func (r *SecurityPolicyResource) ImportState(ctx context.Context, req resource.I
 }
 
 // buildSecurityPolicyAPIModel converts the Terraform resource model into the API client struct.
-func buildSecurityPolicyAPIModel(ctx context.Context, plan *SecurityPolicyResourceModel) *client.SecurityPolicy {
+func buildSecurityPolicyAPIModel(ctx context.Context, plan *SecurityPolicyResourceModel) (*client.SecurityPolicy, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
 	sp := &client.SecurityPolicy{
 		ID:          plan.ID.ValueString(),
 		Name:        plan.Name.ValueString(),
@@ -460,29 +681,41 @@ func buildSecurityPolicyAPIModel(ctx context.Context, plan *SecurityPolicyResour
 	// Tags
 	if !plan.Tags.IsNull() && !plan.Tags.IsUnknown() {
 		var tags []string
-		plan.Tags.ElementsAs(ctx, &tags, false)
+		diags.Append(plan.Tags.ElementsAs(ctx, &tags, false)...)
 		sp.Tags = tags
 	}
 
 	// Session
-	sp.Session = buildSessionKeys(plan.Session)
+	var sessions []SessionKeyModel
+	if !plan.Session.IsNull() && !plan.Session.IsUnknown() {
+		diags.Append(plan.Session.ElementsAs(ctx, &sessions, false)...)
+	}
+	sp.Session = buildSessionKeys(sessions)
 
 	// SessionIDs
-	if len(plan.SessionIDs) == 0 {
+	var sessionIDs []SessionKeyModel
+	if !plan.SessionIDs.IsNull() && !plan.SessionIDs.IsUnknown() {
+		diags.Append(plan.SessionIDs.ElementsAs(ctx, &sessionIDs, false)...)
+	}
+	if len(sessionIDs) == 0 {
 		sp.SessionIDs = []map[string]string{}
 	} else {
-		sp.SessionIDs = buildSessionKeys(plan.SessionIDs)
+		sp.SessionIDs = buildSessionKeys(sessionIDs)
 	}
 
 	// Map
-	if len(plan.Map) > 0 {
-		sp.Map = make([]client.SecProfileMap, len(plan.Map))
-		for i, m := range plan.Map {
+	var maps []SecProfileMapModel
+	if !plan.Map.IsNull() && !plan.Map.IsUnknown() {
+		diags.Append(plan.Map.ElementsAs(ctx, &maps, false)...)
+	}
+	if len(maps) > 0 {
+		sp.Map = make([]client.SecProfileMap, len(maps))
+		for i, m := range maps {
 			sp.Map[i] = buildSecProfileMapEntry(ctx, m)
 		}
 	}
 
-	return sp
+	return sp, diags
 }
 
 // buildSecProfileMapEntry converts a single SecProfileMapModel into the API client struct.
@@ -509,37 +742,60 @@ func buildSecProfileMapEntry(ctx context.Context, m SecProfileMapModel) client.S
 	return entry
 }
 
-// mergeDefaultMaps returns a new map slice that includes server-managed default maps
-// from the prior state that are absent from the planned maps, preventing spurious diffs.
-// Returns nil if no changes are needed.
-func mergeDefaultMaps(stateMaps, planMaps []SecProfileMapModel) []SecProfileMapModel {
-	const defaultMapID = "__site_level__"
+// defaultSiteLevelMap returns the hardcoded baseline definition for the server-managed
+// "__site_level__" map entry, used when it is absent from the user's configuration and
+// for every field but rate_limit_rules/edge_functions when it is present.
+func defaultSiteLevelMap() SecProfileMapModel {
+	return SecProfileMapModel{
+		ID:                         types.StringValue(siteLevelMapID),
+		Name:                       types.StringValue("Site Level"),
+		Match:                      types.StringValue(siteLevelMapID),
+		ACLProfile:                 types.StringValue("__acldefault__"),
+		ACLProfileActive:           types.BoolValue(false),
+		ContentFilterProfile:       types.StringValue("__defaultcontentfilter__"),
+		ContentFilterProfileActive: types.BoolValue(false),
+		BackendService:             types.StringValue("__default__"),
+		Description:                types.StringValue(""),
+		RateLimitRules:             types.ListNull(types.StringType),
+		EdgeFunctions:              types.ListNull(types.StringType),
+	}
+}
 
-	// Find the default map in state.
-	var defaultMap *SecProfileMapModel
-	for i := range stateMaps {
-		if stateMaps[i].ID.ValueString() == defaultMapID {
-			m := stateMaps[i]
-			defaultMap = &m
+// resolveSiteLevelMap returns a new map slice where the "__site_level__" entry is
+// resolved from priorMaps (the prior state) whenever it already exists there, so that
+// any of its fields managed outside of Terraform (e.g. via the API/UI) are left
+// untouched instead of being forced back to the hardcoded baseline. The user may still
+// explicitly manage rate_limit_rules/edge_functions by setting them in the
+// configuration; any other value in planMaps is ignored, since ValidateConfig
+// guarantees they were left unset there. If the entry has no prior state (e.g. initial
+// create), the hardcoded baseline is used instead.
+func resolveSiteLevelMap(planMaps, priorMaps []SecProfileMapModel) []SecProfileMapModel {
+	result := make([]SecProfileMapModel, len(planMaps))
+	copy(result, planMaps)
+
+	baseline := defaultSiteLevelMap()
+	for _, m := range priorMaps {
+		if m.ID.ValueString() == siteLevelMapID {
+			baseline = m
 			break
 		}
 	}
-	if defaultMap == nil {
-		return nil
-	}
 
-	// Check if default map is already in the plan.
-	for _, m := range planMaps {
-		if m.ID.ValueString() == defaultMapID {
-			return nil
+	for i, m := range result {
+		if m.ID.ValueString() == siteLevelMapID {
+			locked := baseline
+			if !m.RateLimitRules.IsNull() {
+				locked.RateLimitRules = m.RateLimitRules
+			}
+			if !m.EdgeFunctions.IsNull() {
+				locked.EdgeFunctions = m.EdgeFunctions
+			}
+			result[i] = locked
+			return result
 		}
 	}
 
-	// Append the default map to the plan.
-	merged := make([]SecProfileMapModel, len(planMaps)+1)
-	copy(merged, planMaps)
-	merged[len(planMaps)] = *defaultMap
-	return merged
+	return append(result, baseline)
 }
 
 // parseSessionKeys converts the API interface{} to []SessionKeyModel.

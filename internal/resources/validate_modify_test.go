@@ -10,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
+	"github.com/link11/terraform-provider-link11waap/internal/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -367,6 +368,113 @@ func TestSecurityPolicyResource_ModifyPlan_BothExist(t *testing.T) {
 	assert.False(t, resp.Diagnostics.HasError(), "expected no errors: %v", resp.Diagnostics)
 }
 
+// TestSecurityPolicyResource_ValidateConfig_UnknownSessionSessionIDsMap
+// reproduces the crash scenario: `dynamic "session"`/`dynamic
+// "session_ids"` blocks and a `dynamic "map"` block whose for_each cannot be
+// resolved at plan time make the whole collection unknown (not just
+// individual elements). ValidateConfig must defer all the related checks
+// (exactly-one-session-block, per-entry field checks, map field-presence
+// rules) instead of erroring or panicking.
+func TestSecurityPolicyResource_ValidateConfig_UnknownSessionSessionIDsMap(t *testing.T) {
+	r := &SecurityPolicyResource{}
+	ctx := context.Background()
+
+	sessionBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
+	}}
+	mapBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id": tftypes.String, "name": tftypes.String, "match": tftypes.String,
+		"acl_profile": tftypes.String, "acl_profile_active": tftypes.Bool,
+		"content_filter_profile": tftypes.String, "content_filter_profile_active": tftypes.Bool,
+		"backend_service": tftypes.String, "description": tftypes.String,
+		"rate_limit_rules": tftypes.List{ElementType: tftypes.String},
+		"edge_functions":   tftypes.List{ElementType: tftypes.String},
+	}}
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":        tftypes.NewValue(tftypes.String, "test"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"session":     tftypes.NewValue(tftypes.List{ElementType: sessionBlockType}, tftypes.UnknownValue),
+		"session_ids": tftypes.NewValue(tftypes.List{ElementType: sessionBlockType}, tftypes.UnknownValue),
+		"map":         tftypes.NewValue(tftypes.Set{ElementType: mapBlockType}, tftypes.UnknownValue),
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown session/session_ids/map collections should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestSecurityPolicyResource_ModifyPlan_UnknownMap reproduces the WP-2553
+// crash scenario at the ModifyPlan layer: a `dynamic "map"` block whose
+// for_each cannot be resolved at plan time makes the whole `map` collection
+// unknown. ModifyPlan must defer site-level-entry resolution to a later plan
+// cycle instead of erroring, panicking, or forcing the collection to a
+// (wrongly) known value.
+func TestSecurityPolicyResource_ModifyPlan_UnknownMap(t *testing.T) {
+	r := &SecurityPolicyResource{}
+	ctx := context.Background()
+
+	sessionBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
+	}}
+	mapBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"id": tftypes.String, "name": tftypes.String, "match": tftypes.String,
+		"acl_profile": tftypes.String, "acl_profile_active": tftypes.Bool,
+		"content_filter_profile": tftypes.String, "content_filter_profile_active": tftypes.Bool,
+		"backend_service": tftypes.String, "description": tftypes.String,
+		"rate_limit_rules": tftypes.List{ElementType: tftypes.String},
+		"edge_functions":   tftypes.List{ElementType: tftypes.String},
+	}}
+
+	planVals := map[string]tftypes.Value{
+		"config_id":   tftypes.NewValue(tftypes.String, "cfg1"),
+		"id":          tftypes.NewValue(tftypes.String, "sp1"),
+		"name":        tftypes.NewValue(tftypes.String, "test"),
+		"description": tftypes.NewValue(tftypes.String, ""),
+		"tags":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, nil),
+		"session": tftypes.NewValue(
+			tftypes.List{ElementType: sessionBlockType},
+			[]tftypes.Value{
+				tftypes.NewValue(sessionBlockType, map[string]tftypes.Value{
+					"attrs":   tftypes.NewValue(tftypes.String, "ip"),
+					"args":    tftypes.NewValue(tftypes.String, nil),
+					"plugins": tftypes.NewValue(tftypes.String, nil),
+					"cookies": tftypes.NewValue(tftypes.String, nil),
+					"headers": tftypes.NewValue(tftypes.String, nil),
+				}),
+			},
+		),
+		"session_ids": tftypes.NewValue(tftypes.List{ElementType: sessionBlockType}, []tftypes.Value{}),
+		"map":         tftypes.NewValue(tftypes.Set{ElementType: mapBlockType}, tftypes.UnknownValue),
+	}
+
+	plan := buildTerraformPlan(ctx, t, r, planVals)
+	state := tfsdk.State{Schema: plan.Schema, Raw: tftypes.NewValue(plan.Schema.Type().TerraformType(ctx), nil)}
+
+	req := resource.ModifyPlanRequest{
+		Plan:  plan,
+		State: state,
+	}
+	resp := &resource.ModifyPlanResponse{
+		Plan: tfsdk.Plan{Schema: plan.Schema, Raw: plan.Raw.Copy()},
+	}
+
+	assert.NotPanics(t, func() {
+		r.ModifyPlan(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown map collection should defer resolution, not error: %v", resp.Diagnostics)
+
+	var planned SecurityPolicyResourceModel
+	resp.Diagnostics.Append(resp.Plan.Get(ctx, &planned)...)
+	require.False(t, resp.Diagnostics.HasError())
+	assert.True(t, planned.Map.IsUnknown(), "map should remain unknown, deferred to a later plan cycle")
+}
+
 // --- RateLimitRule ValidateConfig Tests ---
 
 func TestRateLimitRuleResource_ValidateConfig_NoKeys(t *testing.T) {
@@ -559,6 +667,82 @@ func TestRateLimitRuleResource_ValidateConfig_ValidPlugins(t *testing.T) {
 	r.ValidateConfig(ctx, req, resp)
 
 	assert.False(t, resp.Diagnostics.HasError(), "expected no errors for valid plugins with jwt prefix: %v", resp.Diagnostics)
+}
+
+// TestRateLimitRuleResource_ValidateConfig_UnknownKey reproduces the WP-2553
+// crash scenario: a `dynamic "key"` block whose for_each cannot be resolved at
+// plan time makes the whole `key` collection unknown (not just individual
+// elements). ValidateConfig must defer the "at least one key" and
+// exactly-one-field checks instead of erroring or panicking.
+func TestRateLimitRuleResource_ValidateConfig_UnknownKey(t *testing.T) {
+	r := &RateLimitRuleResource{}
+	ctx := context.Background()
+
+	keyBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
+	}}
+	tagFilterBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"relation": tftypes.String,
+		"tags":     tftypes.List{ElementType: tftypes.String},
+	}}
+
+	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
+		"config_id":     tftypes.NewValue(tftypes.String, "cfg1"),
+		"name":          tftypes.NewValue(tftypes.String, "test"),
+		"description":   tftypes.NewValue(tftypes.String, ""),
+		"global":        tftypes.NewValue(tftypes.Bool, false),
+		"active":        tftypes.NewValue(tftypes.Bool, true),
+		"timeframe":     tftypes.NewValue(tftypes.Number, 60),
+		"threshold":     tftypes.NewValue(tftypes.Number, 100),
+		"action":        tftypes.NewValue(tftypes.String, "action-monitor"),
+		"is_action_ban": tftypes.NewValue(tftypes.Bool, false),
+		"pairwith":      tftypes.NewValue(tftypes.String, `{"self":"self"}`),
+		"key":           tftypes.NewValue(tftypes.List{ElementType: keyBlockType}, tftypes.UnknownValue),
+		"include":       tftypes.NewValue(tagFilterBlockType, nil),
+		"exclude":       tftypes.NewValue(tagFilterBlockType, nil),
+	})
+
+	req := resource.ValidateConfigRequest{Config: config}
+	resp := &resource.ValidateConfigResponse{}
+
+	assert.NotPanics(t, func() {
+		r.ValidateConfig(ctx, req, resp)
+	})
+	assert.False(t, resp.Diagnostics.HasError(), "unknown key collection should defer validation, not error: %v", resp.Diagnostics)
+}
+
+// TestBuildRateLimitRuleAPIModel_UnknownKey ensures the API-model builder
+// tolerates a wholly-unknown key collection (as produced by an unresolved
+// `dynamic` block) without panicking. Only reachable at plan time; by apply
+// time Terraform guarantees fully known values.
+func TestBuildRateLimitRuleAPIModel_UnknownKey(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &RateLimitRuleResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Global:      types.BoolValue(false),
+		Active:      types.BoolValue(true),
+		Timeframe:   types.Int64Value(60),
+		Threshold:   types.Int64Value(100),
+		TTL:         types.Int64Value(0),
+		Action:      types.StringValue("action-monitor"),
+		IsActionBan: types.BoolValue(false),
+		Tags:        types.ListNull(types.StringType),
+		Key:         types.ListUnknown(rateLimitKeyModelType()),
+		Pairwith:    types.StringValue(`{"self":"self"}`),
+		Include:     types.ObjectNull(tagFilterAttrTypes),
+		Exclude:     types.ObjectNull(tagFilterAttrTypes),
+	}
+
+	var rule *client.RateLimitRule
+	var diags diag.Diagnostics
+	assert.NotPanics(t, func() {
+		rule, diags = buildRateLimitRuleAPIModel(ctx, plan)
+	})
+	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
+	assert.Nil(t, rule.Key, "key should be left unset when the collection is unknown")
 }
 
 // --- Publish Delete and getBuckets Tests ---

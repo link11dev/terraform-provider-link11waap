@@ -482,6 +482,17 @@ func TestTagFilterToObject_EmptyTags(t *testing.T) {
 	}
 }
 
+// mustRateLimitKeyList builds a types.List of RateLimitKeyModel for use in
+// RateLimitRuleResourceModel literals.
+func mustRateLimitKeyList(t *testing.T, keys []RateLimitKeyModel) types.List {
+	t.Helper()
+	l, diags := rateLimitKeyModelsToList(context.Background(), keys)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return l
+}
+
 func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 	ctx := context.Background()
 
@@ -505,9 +516,9 @@ func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		IsActionBan: types.BoolValue(false),
 		Tags:        types.ListNull(types.StringType),
-		Key: []RateLimitKeyModel{
+		Key: mustRateLimitKeyList(t, []RateLimitKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
+		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
 		Include:  includeObj,
 		Exclude:  excludeObj,
@@ -561,9 +572,9 @@ func TestBuildRateLimitRuleAPIModel_NullPairwith(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		IsActionBan: types.BoolValue(false),
 		Tags:        types.ListNull(types.StringType),
-		Key: []RateLimitKeyModel{
+		Key: mustRateLimitKeyList(t, []RateLimitKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
+		}),
 		Pairwith: types.StringNull(),
 		Include:  emptyObj,
 		Exclude:  emptyObj,
@@ -609,9 +620,9 @@ func TestBuildRateLimitRuleAPIModel_WithTags(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		IsActionBan: types.BoolValue(false),
 		Tags:        tags,
-		Key: []RateLimitKeyModel{
+		Key: mustRateLimitKeyList(t, []RateLimitKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
+		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
 		Include:  emptyObj,
 		Exclude:  emptyObj,

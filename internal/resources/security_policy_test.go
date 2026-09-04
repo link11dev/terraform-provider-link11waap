@@ -9,6 +9,28 @@ import (
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 )
 
+// mustSecProfileMapSet builds a types.Set of SecProfileMapModel for use in
+// SecurityPolicyResourceModel literals.
+func mustSecProfileMapSet(t *testing.T, models []SecProfileMapModel) types.Set {
+	t.Helper()
+	s, diags := secProfileMapModelsToSet(context.Background(), models)
+	if diags.HasError() {
+		t.Fatalf("mustSecProfileMapSet: %v", diags)
+	}
+	return s
+}
+
+// mustSessionKeyList builds a types.List of SessionKeyModel for use in
+// SecurityPolicyResourceModel literals.
+func mustSessionKeyList(t *testing.T, models []SessionKeyModel) types.List {
+	t.Helper()
+	l, diags := sessionKeyModelsToList(context.Background(), models)
+	if diags.HasError() {
+		t.Fatalf("mustSessionKeyList: %v", diags)
+	}
+	return l
+}
+
 func TestBuildSecProfileMapEntry_AllFields(t *testing.T) {
 	ctx := context.Background()
 
@@ -108,11 +130,14 @@ func TestBuildSecProfileMapEntry_EmptySlice(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         models,
+		Map:         mustSecProfileMapSet(t, models),
 		ConfigID:    types.StringValue("config-1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 	if sp.Map != nil {
 		t.Errorf("expected nil Map for empty slice, got %v", sp.Map)
 	}
@@ -157,13 +182,16 @@ func TestBuildSecProfileMapEntries_MultipleEntries(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         models,
+		Map:         mustSecProfileMapSet(t, models),
 		// Session:     types.StringNull(),
 		// c:  types.StringNull(),
 		ConfigID: types.StringValue("config-1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 	if len(sp.Map) != 2 {
 		t.Fatalf("expected 2 map entries, got %d", len(sp.Map))
 	}
@@ -293,20 +321,7 @@ func TestRoundTrip_APIToModelToAPI(t *testing.T) {
 	}
 }
 
-func TestMergeDefaultMaps_AddsSiteLevelToPlan(t *testing.T) {
-	siteLevel := SecProfileMapModel{
-		ID:                         types.StringValue("__site_level__"),
-		Name:                       types.StringValue("Site Level"),
-		Match:                      types.StringValue("__site_level__"),
-		ACLProfile:                 types.StringValue("__acldefault__"),
-		ACLProfileActive:           types.BoolValue(false),
-		ContentFilterProfile:       types.StringValue("__defaultcontentfilter__"),
-		ContentFilterProfileActive: types.BoolValue(false),
-		BackendService:             types.StringValue("__default__"),
-		Description:                types.StringValue(""),
-		RateLimitRules:             types.ListNull(types.StringType),
-		EdgeFunctions:              types.ListNull(types.StringType),
-	}
+func TestResolveSiteLevelMap_AddsBaselineWhenNoPriorState(t *testing.T) {
 	apiEntry := SecProfileMapModel{
 		ID:                         types.StringValue("api-entry"),
 		Name:                       types.StringValue("API"),
@@ -321,76 +336,206 @@ func TestMergeDefaultMaps_AddsSiteLevelToPlan(t *testing.T) {
 		EdgeFunctions:              types.ListNull(types.StringType),
 	}
 
-	stateMaps := []SecProfileMapModel{apiEntry, siteLevel}
 	planMaps := []SecProfileMapModel{apiEntry}
 
-	result := mergeDefaultMaps(stateMaps, planMaps)
+	// No prior state (e.g. initial create): the hardcoded baseline is injected.
+	result := resolveSiteLevelMap(planMaps, nil)
 
-	if result == nil {
-		t.Fatal("expected non-nil merged maps, got nil")
-	}
 	if len(result) != 2 {
-		t.Errorf("expected 2 maps, got %d", len(result))
+		t.Fatalf("expected 2 maps, got %d", len(result))
 	}
 
-	found := false
-	for _, m := range result {
-		if m.ID.ValueString() == "__site_level__" {
-			found = true
+	var siteLevel *SecProfileMapModel
+	for i := range result {
+		if result[i].ID.ValueString() == siteLevelMapID {
+			siteLevel = &result[i]
 			break
 		}
 	}
-	if !found {
-		t.Error("expected __site_level__ map to be present in merged result")
+	if siteLevel == nil {
+		t.Fatal("expected __site_level__ map to be present in merged result")
 	}
+	assertSiteLevelMapMatchesBaseline(t, *siteLevel)
 }
 
-func TestMergeDefaultMaps_NoChangeWhenAlreadyInPlan(t *testing.T) {
-	siteLevel := SecProfileMapModel{
-		ID:                   types.StringValue("__site_level__"),
+func TestResolveSiteLevelMap_PropagatesPriorStateWhenPresent(t *testing.T) {
+	// The site-level entry may be managed outside of Terraform (e.g. via the
+	// API/UI), so once it exists in prior state, its fields must be carried
+	// forward as-is rather than reset to the hardcoded baseline.
+	rl, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"rl-1"})
+	ef, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"ef-1"})
+
+	priorSiteLevel := SecProfileMapModel{
+		ID:                   types.StringValue(siteLevelMapID),
 		Name:                 types.StringValue("Site Level"),
-		Match:                types.StringValue("__site_level__"),
-		ACLProfile:           types.StringValue("__acldefault__"),
-		BackendService:       types.StringValue("__default__"),
-		ContentFilterProfile: types.StringValue("__defaultcontentfilter__"),
-		RateLimitRules:       types.ListNull(types.StringType),
-		EdgeFunctions:        types.ListNull(types.StringType),
+		Match:                types.StringValue(siteLevelMapID),
+		ACLProfile:           types.StringValue("acl-custom"),
+		ACLProfileActive:     types.BoolValue(true),
+		BackendService:       types.StringValue("be-custom"),
+		ContentFilterProfile: types.StringValue("cf-custom"),
+		Description:          types.StringValue(""),
+		RateLimitRules:       rl,
+		EdgeFunctions:        ef,
 	}
 
-	stateMaps := []SecProfileMapModel{siteLevel}
-	planMaps := []SecProfileMapModel{siteLevel}
+	// The entry isn't declared in config, so it's absent from the plan.
+	planMaps := []SecProfileMapModel{}
+	priorMaps := []SecProfileMapModel{priorSiteLevel}
 
-	result := mergeDefaultMaps(stateMaps, planMaps)
-	if result != nil {
-		t.Errorf("expected nil (no changes needed), got %v", result)
-	}
-}
-
-func TestMergeDefaultMaps_NoChangeWhenNotInState(t *testing.T) {
-	apiEntry := SecProfileMapModel{
-		ID:                   types.StringValue("api-entry"),
-		Name:                 types.StringValue("API"),
-		Match:                types.StringValue("/api/"),
-		ACLProfile:           types.StringValue("acl-1"),
-		BackendService:       types.StringValue("be-1"),
-		ContentFilterProfile: types.StringValue("cf-1"),
-		RateLimitRules:       types.ListNull(types.StringType),
-		EdgeFunctions:        types.ListNull(types.StringType),
+	result := resolveSiteLevelMap(planMaps, priorMaps)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 map, got %d", len(result))
 	}
 
-	stateMaps := []SecProfileMapModel{apiEntry}
-	planMaps := []SecProfileMapModel{apiEntry}
-
-	result := mergeDefaultMaps(stateMaps, planMaps)
-	if result != nil {
-		t.Errorf("expected nil (no default map in state), got %v", result)
+	got := result[0]
+	if got.ACLProfile.ValueString() != "acl-custom" {
+		t.Errorf("ACLProfile: expected prior value %q to be preserved, got %q", "acl-custom", got.ACLProfile.ValueString())
+	}
+	if got.BackendService.ValueString() != "be-custom" {
+		t.Errorf("BackendService: expected prior value %q to be preserved, got %q", "be-custom", got.BackendService.ValueString())
+	}
+	if !got.RateLimitRules.Equal(rl) {
+		t.Errorf("expected RateLimitRules to be carried over as %v, got %v", rl, got.RateLimitRules)
+	}
+	if !got.EdgeFunctions.Equal(ef) {
+		t.Errorf("expected EdgeFunctions to be carried over as %v, got %v", ef, got.EdgeFunctions)
 	}
 }
 
-func TestMergeDefaultMaps_EmptyStateMaps(t *testing.T) {
-	result := mergeDefaultMaps(nil, nil)
-	if result != nil {
-		t.Errorf("expected nil for empty state, got %v", result)
+func TestResolveSiteLevelMap_ExplicitConfigOverridesRateLimitAndEdgeFunctions(t *testing.T) {
+	// The user may still explicitly manage rate_limit_rules/edge_functions by
+	// setting them in config; that value must win over the prior state's.
+	oldRL, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"old-rl"})
+	oldEF, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"old-ef"})
+	newRL, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"new-rl"})
+	newEF, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"new-ef"})
+
+	priorSiteLevel := defaultSiteLevelMap()
+	priorSiteLevel.RateLimitRules = oldRL
+	priorSiteLevel.EdgeFunctions = oldEF
+
+	planSiteLevel := SecProfileMapModel{
+		ID:             types.StringValue(siteLevelMapID),
+		RateLimitRules: newRL,
+		EdgeFunctions:  newEF,
+	}
+
+	result := resolveSiteLevelMap([]SecProfileMapModel{planSiteLevel}, []SecProfileMapModel{priorSiteLevel})
+	if len(result) != 1 {
+		t.Fatalf("expected 1 map, got %d", len(result))
+	}
+
+	if !result[0].RateLimitRules.Equal(newRL) {
+		t.Errorf("expected RateLimitRules to be overridden with %v, got %v", newRL, result[0].RateLimitRules)
+	}
+	if !result[0].EdgeFunctions.Equal(newEF) {
+		t.Errorf("expected EdgeFunctions to be overridden with %v, got %v", newEF, result[0].EdgeFunctions)
+	}
+}
+
+func TestResolveSiteLevelMap_EmptyPlanAndPriorMaps(t *testing.T) {
+	result := resolveSiteLevelMap(nil, nil)
+	if len(result) != 1 {
+		t.Fatalf("expected the hardcoded baseline to be injected into an empty plan, got %v", result)
+	}
+	assertSiteLevelMapMatchesBaseline(t, result[0])
+}
+
+func TestValidateSecProfileMapEntry_SiteLevelRejectsOtherFields(t *testing.T) {
+	m := SecProfileMapModel{
+		ID:                         types.StringValue(siteLevelMapID),
+		Name:                       types.StringValue("Custom"),
+		Match:                      types.StringNull(),
+		ACLProfile:                 types.StringNull(),
+		ACLProfileActive:           types.BoolNull(),
+		ContentFilterProfile:       types.StringNull(),
+		ContentFilterProfileActive: types.BoolNull(),
+		BackendService:             types.StringNull(),
+		Description:                types.StringNull(),
+		RateLimitRules:             types.ListNull(types.StringType),
+		EdgeFunctions:              types.ListNull(types.StringType),
+	}
+
+	errs := validateSecProfileMapEntry(m)
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly 1 error for the single set field (name), got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateSecProfileMapEntry_SiteLevelAllowsOnlyIDRateLimitAndEdgeFunctions(t *testing.T) {
+	rl, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"rl-1"})
+	ef, _ := types.ListValueFrom(context.Background(), types.StringType, []string{"ef-1"})
+
+	m := SecProfileMapModel{
+		ID:                         types.StringValue(siteLevelMapID),
+		Name:                       types.StringNull(),
+		Match:                      types.StringNull(),
+		ACLProfile:                 types.StringNull(),
+		ACLProfileActive:           types.BoolNull(),
+		ContentFilterProfile:       types.StringNull(),
+		ContentFilterProfileActive: types.BoolNull(),
+		BackendService:             types.StringNull(),
+		Description:                types.StringNull(),
+		RateLimitRules:             rl,
+		EdgeFunctions:              ef,
+	}
+
+	errs := validateSecProfileMapEntry(m)
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %v", errs)
+	}
+}
+
+func TestValidateSecProfileMapEntry_NonSiteLevelRequiresAllFields(t *testing.T) {
+	m := SecProfileMapModel{
+		ID:                         types.StringValue("api-entry"),
+		Name:                       types.StringValue("API"),
+		Match:                      types.StringNull(),
+		ACLProfile:                 types.StringNull(),
+		ACLProfileActive:           types.BoolValue(true),
+		ContentFilterProfile:       types.StringNull(),
+		ContentFilterProfileActive: types.BoolValue(true),
+		BackendService:             types.StringNull(),
+	}
+
+	errs := validateSecProfileMapEntry(m)
+	if len(errs) != 4 {
+		t.Fatalf("expected 4 missing-field errors (match, acl_profile, content_filter_profile, backend_service), got %d: %v", len(errs), errs)
+	}
+}
+
+// assertSiteLevelMapMatchesBaseline verifies m matches the hardcoded default
+// definition returned by defaultSiteLevelMap.
+func assertSiteLevelMapMatchesBaseline(t *testing.T, m SecProfileMapModel) {
+	t.Helper()
+	want := defaultSiteLevelMap()
+
+	if m.ID.ValueString() != want.ID.ValueString() {
+		t.Errorf("ID: expected %q, got %q", want.ID.ValueString(), m.ID.ValueString())
+	}
+	if m.Name.ValueString() != want.Name.ValueString() {
+		t.Errorf("Name: expected %q, got %q", want.Name.ValueString(), m.Name.ValueString())
+	}
+	if m.Match.ValueString() != want.Match.ValueString() {
+		t.Errorf("Match: expected %q, got %q", want.Match.ValueString(), m.Match.ValueString())
+	}
+	if m.ACLProfile.ValueString() != want.ACLProfile.ValueString() {
+		t.Errorf("ACLProfile: expected %q, got %q", want.ACLProfile.ValueString(), m.ACLProfile.ValueString())
+	}
+	if m.ACLProfileActive.ValueBool() != want.ACLProfileActive.ValueBool() {
+		t.Errorf("ACLProfileActive: expected %v, got %v", want.ACLProfileActive.ValueBool(), m.ACLProfileActive.ValueBool())
+	}
+	if m.ContentFilterProfile.ValueString() != want.ContentFilterProfile.ValueString() {
+		t.Errorf("ContentFilterProfile: expected %q, got %q", want.ContentFilterProfile.ValueString(), m.ContentFilterProfile.ValueString())
+	}
+	if m.ContentFilterProfileActive.ValueBool() != want.ContentFilterProfileActive.ValueBool() {
+		t.Errorf("ContentFilterProfileActive: expected %v, got %v", want.ContentFilterProfileActive.ValueBool(), m.ContentFilterProfileActive.ValueBool())
+	}
+	if m.BackendService.ValueString() != want.BackendService.ValueString() {
+		t.Errorf("BackendService: expected %q, got %q", want.BackendService.ValueString(), m.BackendService.ValueString())
+	}
+	if m.Description.ValueString() != want.Description.ValueString() {
+		t.Errorf("Description: expected %q, got %q", want.Description.ValueString(), m.Description.ValueString())
 	}
 }
 
@@ -760,15 +905,18 @@ func TestBuildSecurityPolicyAPIModel_WithTags(t *testing.T) {
 		Name:        types.StringValue("test-sp"),
 		Description: types.StringValue("desc"),
 		Tags:        tags,
-		Map:         []SecProfileMapModel{},
-		Session: []SessionKeyModel{
+		Map:         mustSecProfileMapSet(t, nil),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
-		SessionIDs: []SessionKeyModel{},
+		}),
+		SessionIDs: mustSessionKeyList(t, nil),
 		ConfigID:   types.StringValue("cfg1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	if sp.Name != "test-sp" {
 		t.Errorf("expected Name='test-sp', got '%s'", sp.Name)
@@ -793,13 +941,16 @@ func TestBuildSecurityPolicyAPIModel_NullTags(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         []SecProfileMapModel{},
-		Session:     []SessionKeyModel{},
-		SessionIDs:  []SessionKeyModel{},
+		Map:         mustSecProfileMapSet(t, nil),
+		Session:     mustSessionKeyList(t, nil),
+		SessionIDs:  mustSessionKeyList(t, nil),
 		ConfigID:    types.StringValue("cfg1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	if sp.Tags != nil {
 		t.Errorf("expected nil tags, got %v", sp.Tags)
@@ -814,17 +965,20 @@ func TestBuildSecurityPolicyAPIModel_WithSessionIDs(t *testing.T) {
 		Name:        types.StringValue("test"),
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
-		Map:         []SecProfileMapModel{},
-		Session: []SessionKeyModel{
+		Map:         mustSecProfileMapSet(t, nil),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
-		SessionIDs: []SessionKeyModel{
+		}),
+		SessionIDs: mustSessionKeyList(t, []SessionKeyModel{
 			{Attrs: types.StringNull(), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringValue("sid"), Headers: types.StringNull()},
-		},
+		}),
 		ConfigID: types.StringValue("cfg1"),
 	}
 
-	sp := buildSecurityPolicyAPIModel(ctx, plan)
+	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if diags.HasError() {
+		t.Fatalf("unexpected diagnostics: %v", diags)
+	}
 
 	sessionIDs := sp.SessionIDs.([]map[string]string)
 	if len(sessionIDs) != 1 {

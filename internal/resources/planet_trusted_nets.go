@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -45,11 +47,16 @@ type PlanetTrustedNetsResource struct {
 }
 
 // PlanetTrustedNetsResourceModel describes the resource data model.
+//
+// TrustedNets is a types.List (not a native Go slice): the framework's
+// reflection-based decoding cannot represent an unknown value in a plain
+// slice, and Terraform produces unknown collections for blocks generated via
+// `dynamic`.
 type PlanetTrustedNetsResourceModel struct {
-	ConfigID    types.String      `tfsdk:"config_id"`
-	ID          types.String      `tfsdk:"id"`
-	Name        types.String      `tfsdk:"name"`
-	TrustedNets []TrustedNetModel `tfsdk:"trusted_nets"`
+	ConfigID    types.String `tfsdk:"config_id"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	TrustedNets types.List   `tfsdk:"trusted_nets"`
 }
 
 // TrustedNetModel describes a single trusted_nets block entry.
@@ -58,6 +65,26 @@ type TrustedNetModel struct {
 	Address types.String `tfsdk:"address"`
 	GfID    types.String `tfsdk:"gf_id"`
 	Comment types.String `tfsdk:"comment"`
+}
+
+// trustedNetModelType is the object type matching TrustedNetModel, used to convert
+// between types.List and []TrustedNetModel.
+func trustedNetModelType() types.ObjectType {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"source":  types.StringType,
+		"address": types.StringType,
+		"gf_id":   types.StringType,
+		"comment": types.StringType,
+	}}
+}
+
+// trustedNetModelsToList converts []TrustedNetModel to a non-null types.List, treating
+// nil as empty (block collections are never null).
+func trustedNetModelsToList(ctx context.Context, models []TrustedNetModel) (types.List, diag.Diagnostics) {
+	if models == nil {
+		models = []TrustedNetModel{}
+	}
+	return types.ListValueFrom(ctx, trustedNetModelType(), models)
 }
 
 // NewPlanetTrustedNetsResource creates a new resource instance.
@@ -159,7 +186,18 @@ func (v *trustedNetsConfigValidator) ValidateResource(ctx context.Context, req r
 		return
 	}
 
-	for i, entry := range config.TrustedNets {
+	if config.TrustedNets.IsUnknown() {
+		return
+	}
+	var trustedNets []TrustedNetModel
+	if !config.TrustedNets.IsNull() {
+		resp.Diagnostics.Append(config.TrustedNets.ElementsAs(ctx, &trustedNets, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
+	for i, entry := range trustedNets {
 		if entry.Source.IsUnknown() {
 			continue
 		}
@@ -227,7 +265,11 @@ func (r *PlanetTrustedNetsResource) Create(ctx context.Context, req resource.Cre
 		return
 	}
 
-	planet := buildPlanetBody(&plan)
+	planet, diags := buildPlanetBody(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	err := r.client.UpsertPlanet(ctx, plan.ConfigID.ValueString(), defaultPlanetEntryID, planet)
 	if err != nil {
@@ -268,15 +310,18 @@ func (r *PlanetTrustedNetsResource) Read(ctx context.Context, req resource.ReadR
 	state.ID = types.StringValue(planet.ID)
 	state.Name = types.StringValue(planet.Name)
 
-	state.TrustedNets = make([]TrustedNetModel, len(planet.TrustedNets))
+	trustedNets := make([]TrustedNetModel, len(planet.TrustedNets))
 	for i, tn := range planet.TrustedNets {
-		state.TrustedNets[i] = TrustedNetModel{
+		trustedNets[i] = TrustedNetModel{
 			Source:  types.StringValue(tn.Source),
 			Address: types.StringValue(tn.Address),
 			GfID:    types.StringValue(tn.GfID),
 			Comment: types.StringValue(tn.Comment),
 		}
 	}
+	trustedNetsList, diags := trustedNetModelsToList(ctx, trustedNets)
+	resp.Diagnostics.Append(diags...)
+	state.TrustedNets = trustedNetsList
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -289,7 +334,11 @@ func (r *PlanetTrustedNetsResource) Update(ctx context.Context, req resource.Upd
 		return
 	}
 
-	planet := buildPlanetBody(&plan)
+	planet, diags := buildPlanetBody(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	err := r.client.UpsertPlanet(ctx, plan.ConfigID.ValueString(), defaultPlanetEntryID, planet)
 	if err != nil {
@@ -333,9 +382,15 @@ func (r *PlanetTrustedNetsResource) ImportState(ctx context.Context, req resourc
 
 // buildPlanetBody assembles the full Planet struct with user-provided trusted_nets
 // and hardcoded defaults for all other fields.
-func buildPlanetBody(plan *PlanetTrustedNetsResourceModel) *client.Planet {
-	trustedNets := make([]client.TrustedNet, len(plan.TrustedNets))
-	for i, tn := range plan.TrustedNets {
+func buildPlanetBody(ctx context.Context, plan *PlanetTrustedNetsResourceModel) (*client.Planet, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	var models []TrustedNetModel
+	if !plan.TrustedNets.IsNull() && !plan.TrustedNets.IsUnknown() {
+		diags.Append(plan.TrustedNets.ElementsAs(ctx, &models, false)...)
+	}
+
+	trustedNets := make([]client.TrustedNet, len(models))
+	for i, tn := range models {
 		trustedNets[i] = client.TrustedNet{
 			Source:  tn.Source.ValueString(),
 			Comment: tn.Comment.ValueString(),
@@ -352,5 +407,5 @@ func buildPlanetBody(plan *PlanetTrustedNetsResourceModel) *client.Planet {
 		NoHostCertName:     defaultNoHostCertName,
 		NoHostSSLCiphers:   defaultNoHostSSLCiphers,
 		NoHostSSLProtocols: defaultNoHostSSLProtocols,
-	}
+	}, diags
 }
