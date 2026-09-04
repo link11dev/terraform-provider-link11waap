@@ -484,10 +484,6 @@ func TestRateLimitRuleResource_ValidateConfig_NoKeys(t *testing.T) {
 	keyBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
 	}}
-	tagFilterBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-		"relation": tftypes.String,
-		"tags":     tftypes.List{ElementType: tftypes.String},
-	}}
 
 	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
 		"config_id":     tftypes.NewValue(tftypes.String, "cfg1"),
@@ -504,8 +500,6 @@ func TestRateLimitRuleResource_ValidateConfig_NoKeys(t *testing.T) {
 			tftypes.List{ElementType: keyBlockType},
 			[]tftypes.Value{}, // empty - no keys
 		),
-		"include": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
-		"exclude": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
 	})
 
 	req := resource.ValidateConfigRequest{Config: config}
@@ -521,10 +515,6 @@ func TestRateLimitRuleResource_ValidateConfig_ValidKey(t *testing.T) {
 
 	keyBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
-	}}
-	tagFilterBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-		"relation": tftypes.String,
-		"tags":     tftypes.List{ElementType: tftypes.String},
 	}}
 
 	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
@@ -550,8 +540,6 @@ func TestRateLimitRuleResource_ValidateConfig_ValidKey(t *testing.T) {
 				}),
 			},
 		),
-		"include": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
-		"exclude": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
 	})
 
 	req := resource.ValidateConfigRequest{Config: config}
@@ -567,10 +555,6 @@ func TestRateLimitRuleResource_ValidateConfig_TwoFieldsInKey(t *testing.T) {
 
 	keyBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
-	}}
-	tagFilterBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-		"relation": tftypes.String,
-		"tags":     tftypes.List{ElementType: tftypes.String},
 	}}
 
 	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
@@ -596,8 +580,6 @@ func TestRateLimitRuleResource_ValidateConfig_TwoFieldsInKey(t *testing.T) {
 				}),
 			},
 		),
-		"include": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
-		"exclude": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
 	})
 
 	req := resource.ValidateConfigRequest{Config: config}
@@ -613,10 +595,6 @@ func TestRateLimitRuleResource_ValidateConfig_InvalidPlugins(t *testing.T) {
 
 	keyBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
-	}}
-	tagFilterBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-		"relation": tftypes.String,
-		"tags":     tftypes.List{ElementType: tftypes.String},
 	}}
 
 	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
@@ -642,8 +620,6 @@ func TestRateLimitRuleResource_ValidateConfig_InvalidPlugins(t *testing.T) {
 				}),
 			},
 		),
-		"include": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
-		"exclude": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
 	})
 
 	req := resource.ValidateConfigRequest{Config: config}
@@ -659,10 +635,6 @@ func TestRateLimitRuleResource_ValidateConfig_ValidPlugins(t *testing.T) {
 
 	keyBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
 		"attrs": tftypes.String, "args": tftypes.String, "plugins": tftypes.String, "cookies": tftypes.String, "headers": tftypes.String,
-	}}
-	tagFilterBlockType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
-		"relation": tftypes.String,
-		"tags":     tftypes.List{ElementType: tftypes.String},
 	}}
 
 	config := buildConfig(ctx, t, r, map[string]tftypes.Value{
@@ -688,8 +660,6 @@ func TestRateLimitRuleResource_ValidateConfig_ValidPlugins(t *testing.T) {
 				}),
 			},
 		),
-		"include": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
-		"exclude": tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
 	})
 
 	req := resource.ValidateConfigRequest{Config: config}
@@ -728,8 +698,8 @@ func TestRateLimitRuleResource_ValidateConfig_UnknownKey(t *testing.T) {
 		"is_action_ban": tftypes.NewValue(tftypes.Bool, false),
 		"pairwith":      tftypes.NewValue(tftypes.String, `{"self":"self"}`),
 		"key":           tftypes.NewValue(tftypes.List{ElementType: keyBlockType}, tftypes.UnknownValue),
-		"include":       tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
-		"exclude":       tftypes.NewValue(tftypes.Set{ElementType: tagFilterBlockType}, []tftypes.Value{}),
+		"include":       tftypes.NewValue(tagFilterBlockType, nil),
+		"exclude":       tftypes.NewValue(tagFilterBlockType, nil),
 	})
 
 	req := resource.ValidateConfigRequest{Config: config}
@@ -762,8 +732,8 @@ func TestBuildRateLimitRuleAPIModel_UnknownKey(t *testing.T) {
 		Tags:        types.ListNull(types.StringType),
 		Key:         types.ListUnknown(rateLimitKeyModelType()),
 		Pairwith:    types.StringValue(`{"self":"self"}`),
-		Include:     types.SetValueMust(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{}),
-		Exclude:     types.SetValueMust(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{}),
+		Include:     types.ObjectNull(tagFilterAttrTypes),
+		Exclude:     types.ObjectNull(tagFilterAttrTypes),
 	}
 
 	var rule *client.RateLimitRule

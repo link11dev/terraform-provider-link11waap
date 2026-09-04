@@ -24,6 +24,7 @@ var (
 	_ resource.Resource                   = &DynamicRuleResource{}
 	_ resource.ResourceWithImportState    = &DynamicRuleResource{}
 	_ resource.ResourceWithValidateConfig = &DynamicRuleResource{}
+	_ resource.ResourceWithUpgradeState   = &DynamicRuleResource{}
 )
 
 // DynamicRuleResource implements the resource for managing a dynamic rule
@@ -45,8 +46,8 @@ type DynamicRuleResourceModel struct {
 	Target             types.String `tfsdk:"target"`
 	Action             types.String `tfsdk:"action"`
 	Tags               types.List   `tfsdk:"tags"`
-	Include            types.Set    `tfsdk:"include"`
-	Exclude            types.Set    `tfsdk:"exclude"`
+	Include            types.Object `tfsdk:"include"`
+	Exclude            types.Object `tfsdk:"exclude"`
 }
 
 // NewDynamicRuleResource returns a new instance of the dynamic rule resource
@@ -63,6 +64,7 @@ func (r *DynamicRuleResource) Metadata(_ context.Context, req resource.MetadataR
 func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Dynamic Rule in Link11 WAAP.",
+		Version:     1,
 		Attributes: map[string]schema.Attribute{
 			"config_id": schema.StringAttribute{
 				Description: "The configuration ID.",
@@ -133,41 +135,37 @@ func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 		},
 		Blocks: map[string]schema.Block{
-			"include": schema.SetNestedBlock{
+			"include": schema.SingleNestedBlock{
 				Description: "Include filter: requests matching these tags are counted.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Relation between tags. Valid values: OR, AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
 						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
+					},
+					"tags": schema.ListAttribute{
+						Description: "List of tag identifiers.",
+						Required:    true,
+						ElementType: types.StringType,
 					},
 				},
 			},
-			"exclude": schema.SetNestedBlock{
+			"exclude": schema.SingleNestedBlock{
 				Description: "Exclude filter: requests matching these tags are excluded from counting.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Relation between tags. Valid values: OR, AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
 						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
+					},
+					"tags": schema.ListAttribute{
+						Description: "List of tag identifiers.",
+						Required:    true,
+						ElementType: types.StringType,
 					},
 				},
 			},
@@ -183,26 +181,126 @@ func (r *DynamicRuleResource) ValidateConfig(ctx context.Context, req resource.V
 		return
 	}
 
-	includeCount := 0
-	if !config.Include.IsNull() && !config.Include.IsUnknown() {
-		includeCount = len(config.Include.Elements())
-	}
-	excludeCount := 0
-	if !config.Exclude.IsNull() && !config.Exclude.IsUnknown() {
-		excludeCount = len(config.Exclude.Elements())
-	}
-
-	if includeCount != 1 {
+	if config.Include.IsNull() {
 		resp.Diagnostics.AddError(
 			"Invalid include configuration",
 			"Exactly one 'include' block must be specified.",
 		)
 	}
-	if excludeCount != 1 {
+	if config.Exclude.IsNull() {
 		resp.Diagnostics.AddError(
 			"Invalid exclude configuration",
 			"Exactly one 'exclude' block must be specified.",
 		)
+	}
+}
+
+// dynamicRuleResourceModelV0 describes the dynamic rule resource model prior to schema version 1,
+// when 'include' and 'exclude' were modeled as a set containing at most one object.
+type dynamicRuleResourceModelV0 struct {
+	ConfigID           types.String `tfsdk:"config_id"`
+	ID                 types.String `tfsdk:"id"`
+	Name               types.String `tfsdk:"name"`
+	Description        types.String `tfsdk:"description"`
+	Threshold          types.Int64  `tfsdk:"threshold"`
+	Timeframe          types.Int64  `tfsdk:"timeframe"`
+	TTL                types.Int64  `tfsdk:"ttl"`
+	Active             types.Bool   `tfsdk:"active"`
+	OffloadIPFiltering types.Bool   `tfsdk:"offload_ip_filtering"`
+	Target             types.String `tfsdk:"target"`
+	Action             types.String `tfsdk:"action"`
+	Tags               types.List   `tfsdk:"tags"`
+	Include            types.Set    `tfsdk:"include"`
+	Exclude            types.Set    `tfsdk:"exclude"`
+}
+
+// UpgradeState migrates state from schema version 0 (include/exclude as a single-element set)
+// to version 1 (include/exclude as a single object), so existing resources don't need to be recreated.
+func (r *DynamicRuleResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+
+	priorSchema := schemaResp.Schema
+	priorSchema.Version = 0
+	priorSchema.Blocks = map[string]schema.Block{
+		"include": schema.SetNestedBlock{
+			Description: "Include filter: requests matching these tags are counted.",
+			NestedObject: schema.NestedBlockObject{
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Relation between tags. Valid values: OR, AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
+						},
+					},
+					"tags": schema.ListAttribute{
+						Description: "List of tag identifiers.",
+						Required:    true,
+						ElementType: types.StringType,
+					},
+				},
+			},
+		},
+		"exclude": schema.SetNestedBlock{
+			Description: "Exclude filter: requests matching these tags are excluded from counting.",
+			NestedObject: schema.NestedBlockObject{
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Relation between tags. Valid values: OR, AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
+						},
+					},
+					"tags": schema.ListAttribute{
+						Description: "List of tag identifiers.",
+						Required:    true,
+						ElementType: types.StringType,
+					},
+				},
+			},
+		},
+	}
+
+	return map[int64]resource.StateUpgrader{
+		0: {
+			PriorSchema: &priorSchema,
+			StateUpgrader: func(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+				var priorState dynamicRuleResourceModelV0
+				resp.Diagnostics.Append(req.State.Get(ctx, &priorState)...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+
+				includeObj, diags := tagFilterSetToObject(ctx, priorState.Include)
+				resp.Diagnostics.Append(diags...)
+				excludeObj, diags := tagFilterSetToObject(ctx, priorState.Exclude)
+				resp.Diagnostics.Append(diags...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+
+				upgradedState := DynamicRuleResourceModel{
+					ConfigID:           priorState.ConfigID,
+					ID:                 priorState.ID,
+					Name:               priorState.Name,
+					Description:        priorState.Description,
+					Threshold:          priorState.Threshold,
+					Timeframe:          priorState.Timeframe,
+					TTL:                priorState.TTL,
+					Active:             priorState.Active,
+					OffloadIPFiltering: priorState.OffloadIPFiltering,
+					Target:             priorState.Target,
+					Action:             priorState.Action,
+					Tags:               priorState.Tags,
+					Include:            includeObj,
+					Exclude:            excludeObj,
+				}
+
+				resp.Diagnostics.Append(resp.State.Set(ctx, upgradedState)...)
+			},
+		},
 	}
 }
 
@@ -280,14 +378,14 @@ func (r *DynamicRuleResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	// Include
-	includeSet, diags := tagFilterToSet(ctx, rule.Include)
+	includeObj, diags := tagFilterToObject(ctx, rule.Include)
 	resp.Diagnostics.Append(diags...)
-	state.Include = includeSet
+	state.Include = includeObj
 
 	// Exclude
-	excludeSet, diags := tagFilterToSet(ctx, rule.Exclude)
+	excludeObj, diags := tagFilterToObject(ctx, rule.Exclude)
 	resp.Diagnostics.Append(diags...)
-	state.Exclude = excludeSet
+	state.Exclude = excludeObj
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
@@ -15,14 +17,6 @@ func tagFilterObjType() tftypes.Object {
 		"relation": tftypes.String,
 		"tags":     tftypes.List{ElementType: tftypes.String},
 	}}
-}
-
-func tagFilterSetValue(objType tftypes.Object, entries ...map[string]tftypes.Value) tftypes.Value {
-	elems := make([]tftypes.Value, 0, len(entries))
-	for _, e := range entries {
-		elems = append(elems, tftypes.NewValue(objType, e))
-	}
-	return tftypes.NewValue(tftypes.Set{ElementType: objType}, elems)
 }
 
 func TestNewDynamicRuleResource(t *testing.T) {
@@ -115,8 +109,8 @@ func TestBuildDynamicRuleAPIModel_BasicFields(t *testing.T) {
 		Target:             types.StringValue("ip"),
 		Action:             types.StringValue("action-monitor"),
 		Tags:               types.ListNull(types.StringType),
-		Include:            types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}),
-		Exclude:            types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}),
+		Include:            types.ObjectNull(tagFilterAttrTypes),
+		Exclude:            types.ObjectNull(tagFilterAttrTypes),
 	}
 	rule, diags := buildDynamicRuleAPIModel(ctx, plan)
 	if diags.HasError() {
@@ -131,11 +125,11 @@ func TestDynamicRuleResource_ValidateConfig_RequiresBothIncludeAndExclude(t *tes
 	ctx := context.Background()
 	r := &DynamicRuleResource{}
 	objType := tagFilterObjType()
-	emptySet := tagFilterSetValue(objType)
-	oneEntry := map[string]tftypes.Value{
+	missing := tftypes.NewValue(objType, nil)
+	present := tftypes.NewValue(objType, map[string]tftypes.Value{
 		"relation": tftypes.NewValue(tftypes.String, "OR"),
 		"tags":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{tftypes.NewValue(tftypes.String, "a")}),
-	}
+	})
 
 	tests := []struct {
 		name      string
@@ -143,10 +137,10 @@ func TestDynamicRuleResource_ValidateConfig_RequiresBothIncludeAndExclude(t *tes
 		exclude   tftypes.Value
 		expectErr bool
 	}{
-		{"only include", tagFilterSetValue(objType, oneEntry), emptySet, true},
-		{"only exclude", emptySet, tagFilterSetValue(objType, oneEntry), true},
-		{"neither", emptySet, emptySet, true},
-		{"both", tagFilterSetValue(objType, oneEntry), tagFilterSetValue(objType, oneEntry), false},
+		{"only include", present, missing, true},
+		{"only exclude", missing, present, true},
+		{"neither", missing, missing, true},
+		{"both", present, present, false},
 	}
 
 	for _, tc := range tests {
@@ -162,5 +156,92 @@ func TestDynamicRuleResource_ValidateConfig_RequiresBothIncludeAndExclude(t *tes
 				t.Errorf("expected HasError=%v, got diags: %v", tc.expectErr, resp.Diagnostics)
 			}
 		})
+	}
+}
+
+func TestDynamicRuleResource_UpgradeState_V0ToV1(t *testing.T) {
+	ctx := context.Background()
+	r := &DynamicRuleResource{}
+
+	upgraders := r.UpgradeState(ctx)
+	upgrader, ok := upgraders[0]
+	if !ok || upgrader.PriorSchema == nil {
+		t.Fatal("expected a version 0 state upgrader with a prior schema")
+	}
+
+	objType := tagFilterObjType()
+	listType := tftypes.List{ElementType: tftypes.String}
+
+	priorTFType := upgrader.PriorSchema.Type().TerraformType(ctx)
+	priorObjType, ok := priorTFType.(tftypes.Object)
+	if !ok {
+		t.Fatalf("expected prior schema to produce a tftypes.Object, got %T", priorTFType)
+	}
+
+	values := make(map[string]tftypes.Value, len(priorObjType.AttributeTypes))
+	for name, at := range priorObjType.AttributeTypes {
+		values[name] = tftypes.NewValue(at, nil)
+	}
+	values["config_id"] = tftypes.NewValue(tftypes.String, "cfg1")
+	values["id"] = tftypes.NewValue(tftypes.String, "dr1")
+	values["name"] = tftypes.NewValue(tftypes.String, "Burst Protection")
+	values["description"] = tftypes.NewValue(tftypes.String, "")
+	values["threshold"] = tftypes.NewValue(tftypes.Number, 100)
+	values["timeframe"] = tftypes.NewValue(tftypes.Number, 60)
+	values["ttl"] = tftypes.NewValue(tftypes.Number, 3600)
+	values["active"] = tftypes.NewValue(tftypes.Bool, true)
+	values["offload_ip_filtering"] = tftypes.NewValue(tftypes.Bool, false)
+	values["target"] = tftypes.NewValue(tftypes.String, "ip")
+	values["action"] = tftypes.NewValue(tftypes.String, "action-monitor")
+	values["include"] = tftypes.NewValue(tftypes.Set{ElementType: objType}, []tftypes.Value{
+		tftypes.NewValue(objType, map[string]tftypes.Value{
+			"relation": tftypes.NewValue(tftypes.String, "OR"),
+			"tags":     tftypes.NewValue(listType, []tftypes.Value{tftypes.NewValue(tftypes.String, "facebook")}),
+		}),
+	})
+	values["exclude"] = tftypes.NewValue(tftypes.Set{ElementType: objType}, []tftypes.Value{})
+
+	priorState := tfsdk.State{
+		Schema: *upgrader.PriorSchema,
+		Raw:    tftypes.NewValue(priorTFType, values),
+	}
+
+	sReq := schemaReq()
+	sResp := schemaResp()
+	r.Schema(ctx, sReq, sResp)
+
+	req := resource.UpgradeStateRequest{State: &priorState}
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{Schema: sResp.Schema},
+	}
+
+	upgrader.StateUpgrader(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diags: %v", resp.Diagnostics)
+	}
+
+	var upgraded DynamicRuleResourceModel
+	if diags := resp.State.Get(ctx, &upgraded); diags.HasError() {
+		t.Fatalf("unexpected diags reading upgraded state: %v", diags)
+	}
+
+	if upgraded.Include.IsNull() {
+		t.Fatal("expected non-null include object after upgrade")
+	}
+	var includeModel RateLimitTagFilterModel
+	if diags := upgraded.Include.As(ctx, &includeModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	if includeModel.Relation.ValueString() != "OR" {
+		t.Errorf("expected relation='OR', got %q", includeModel.Relation.ValueString())
+	}
+	var includeTags []string
+	includeModel.Tags.ElementsAs(ctx, &includeTags, false)
+	if len(includeTags) != 1 || includeTags[0] != "facebook" {
+		t.Errorf("expected tags=['facebook'], got %v", includeTags)
+	}
+
+	if !upgraded.Exclude.IsNull() {
+		t.Error("expected exclude to be null after upgrading an empty legacy set")
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 	"github.com/link11/terraform-provider-link11waap/internal/providerutil"
 )
@@ -26,6 +27,7 @@ var (
 	_ resource.Resource                   = &RateLimitRuleResource{}
 	_ resource.ResourceWithImportState    = &RateLimitRuleResource{}
 	_ resource.ResourceWithValidateConfig = &RateLimitRuleResource{}
+	_ resource.ResourceWithUpgradeState   = &RateLimitRuleResource{}
 )
 
 // RateLimitRuleResource implements the resource for managing a rate limit rule
@@ -54,8 +56,8 @@ type RateLimitRuleResourceModel struct {
 	Tags        types.List   `tfsdk:"tags"`
 	Key         types.List   `tfsdk:"key"`
 	Pairwith    types.String `tfsdk:"pairwith"`
-	Include     types.Set    `tfsdk:"include"`
-	Exclude     types.Set    `tfsdk:"exclude"`
+	Include     types.Object `tfsdk:"include"`
+	Exclude     types.Object `tfsdk:"exclude"`
 	// LastActivated types.Int64         `tfsdk:"last_activated"`
 }
 
@@ -115,6 +117,7 @@ func (r *RateLimitRuleResource) Metadata(_ context.Context, req resource.Metadat
 func (r *RateLimitRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages a Rate Limit Rule in Link11 WAAP.",
+		Version:     1,
 		Attributes: map[string]schema.Attribute{
 			"config_id": schema.StringAttribute{
 				Description: "The configuration ID.",
@@ -215,41 +218,37 @@ func (r *RateLimitRuleResource) Schema(_ context.Context, _ resource.SchemaReque
 					},
 				},
 			},
-			"include": schema.SetNestedBlock{
+			"include": schema.SingleNestedBlock{
 				Description: "Include filter: requests matching these tags are counted.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Relation between tags. Valid values: OR, AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
 						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
+					},
+					"tags": schema.ListAttribute{
+						Description: "List of tag identifiers.",
+						Required:    true,
+						ElementType: types.StringType,
 					},
 				},
 			},
-			"exclude": schema.SetNestedBlock{
+			"exclude": schema.SingleNestedBlock{
 				Description: "Exclude filter: requests matching these tags are excluded from counting.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
+				Attributes: map[string]schema.Attribute{
+					"relation": schema.StringAttribute{
+						Description: "Relation between tags. Valid values: OR, AND.",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf("OR", "AND"),
 						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
+					},
+					"tags": schema.ListAttribute{
+						Description: "List of tag identifiers.",
+						Required:    true,
+						ElementType: types.StringType,
 					},
 				},
 			},
@@ -260,6 +259,125 @@ func (r *RateLimitRuleResource) Schema(_ context.Context, _ resource.SchemaReque
 // Configure sets the client for the resource
 func (r *RateLimitRuleResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	r.client = providerutil.ConfigureClient(req.ProviderData, &resp.Diagnostics)
+}
+
+// rateLimitRuleResourceModelV0 describes the rate limit rule resource model prior to schema version 1,
+// when 'include' and 'exclude' were modeled as a set containing at most one object.
+type rateLimitRuleResourceModelV0 struct {
+	ConfigID    types.String        `tfsdk:"config_id"`
+	ID          types.String        `tfsdk:"id"`
+	Name        types.String        `tfsdk:"name"`
+	Description types.String        `tfsdk:"description"`
+	Global      types.Bool          `tfsdk:"global"`
+	Active      types.Bool          `tfsdk:"active"`
+	Timeframe   types.Int64         `tfsdk:"timeframe"`
+	Threshold   types.Int64         `tfsdk:"threshold"`
+	TTL         types.Int64         `tfsdk:"ttl"`
+	Action      types.String        `tfsdk:"action"`
+	IsActionBan types.Bool          `tfsdk:"is_action_ban"`
+	Tags        types.List          `tfsdk:"tags"`
+	Key         []RateLimitKeyModel `tfsdk:"key"`
+	Pairwith    types.String        `tfsdk:"pairwith"`
+	Include     types.Set           `tfsdk:"include"`
+	Exclude     types.Set           `tfsdk:"exclude"`
+}
+
+// UpgradeState migrates state from schema version 0 (include/exclude as a single-element set)
+// to version 1 (include/exclude as a single object), so existing resources don't need to be recreated.
+func (r *RateLimitRuleResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
+	schemaResp := &resource.SchemaResponse{}
+	r.Schema(ctx, resource.SchemaRequest{}, schemaResp)
+
+	priorBlocks := make(map[string]schema.Block, len(schemaResp.Schema.Blocks))
+	for name, block := range schemaResp.Schema.Blocks {
+		priorBlocks[name] = block
+	}
+	priorBlocks["include"] = schema.SetNestedBlock{
+		Description: "Include filter: requests matching these tags are counted.",
+		NestedObject: schema.NestedBlockObject{
+			Attributes: map[string]schema.Attribute{
+				"relation": schema.StringAttribute{
+					Description: "Relation between tags. Valid values: OR, AND.",
+					Required:    true,
+					Validators: []validator.String{
+						stringvalidator.OneOf("OR", "AND"),
+					},
+				},
+				"tags": schema.ListAttribute{
+					Description: "List of tag identifiers.",
+					Required:    true,
+					ElementType: types.StringType,
+				},
+			},
+		},
+	}
+	priorBlocks["exclude"] = schema.SetNestedBlock{
+		Description: "Exclude filter: requests matching these tags are excluded from counting.",
+		NestedObject: schema.NestedBlockObject{
+			Attributes: map[string]schema.Attribute{
+				"relation": schema.StringAttribute{
+					Description: "Relation between tags. Valid values: OR, AND.",
+					Required:    true,
+					Validators: []validator.String{
+						stringvalidator.OneOf("OR", "AND"),
+					},
+				},
+				"tags": schema.ListAttribute{
+					Description: "List of tag identifiers.",
+					Required:    true,
+					ElementType: types.StringType,
+				},
+			},
+		},
+	}
+
+	priorSchema := schemaResp.Schema
+	priorSchema.Version = 0
+	priorSchema.Blocks = priorBlocks
+
+	return map[int64]resource.StateUpgrader{
+		0: {
+			PriorSchema: &priorSchema,
+			StateUpgrader: func(ctx context.Context, req resource.UpgradeStateRequest, resp *resource.UpgradeStateResponse) {
+				var priorState rateLimitRuleResourceModelV0
+				resp.Diagnostics.Append(req.State.Get(ctx, &priorState)...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+
+				includeObj, diags := tagFilterSetToObject(ctx, priorState.Include)
+				resp.Diagnostics.Append(diags...)
+				excludeObj, diags := tagFilterSetToObject(ctx, priorState.Exclude)
+				resp.Diagnostics.Append(diags...)
+				keyList, diags := rateLimitKeyModelsToList(ctx, priorState.Key)
+				resp.Diagnostics.Append(diags...)
+				if resp.Diagnostics.HasError() {
+					return
+				}
+
+				upgradedState := RateLimitRuleResourceModel{
+					ConfigID:    priorState.ConfigID,
+					ID:          priorState.ID,
+					Name:        priorState.Name,
+					Description: priorState.Description,
+					Global:      priorState.Global,
+					Active:      priorState.Active,
+					Timeframe:   priorState.Timeframe,
+					Threshold:   priorState.Threshold,
+					TTL:         priorState.TTL,
+					Action:      priorState.Action,
+					IsActionBan: priorState.IsActionBan,
+					Tags:        priorState.Tags,
+					Key:         keyList,
+					Pairwith:    priorState.Pairwith,
+					Include:     includeObj,
+					Exclude:     excludeObj,
+				}
+
+				resp.Diagnostics.Append(resp.State.Set(ctx, upgradedState)...)
+			},
+		},
+	}
 }
 
 // Create creates a new rate limit rule using the API client and sets the resource state
@@ -349,14 +467,14 @@ func (r *RateLimitRuleResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Include
-	includeSet, diags := tagFilterToSet(ctx, rule.Include)
+	includeObj, diags := tagFilterToObject(ctx, rule.Include)
 	resp.Diagnostics.Append(diags...)
-	state.Include = includeSet
+	state.Include = includeObj
 
 	// Exclude
-	excludeSet, diags := tagFilterToSet(ctx, rule.Exclude)
+	excludeObj, diags := tagFilterToObject(ctx, rule.Exclude)
 	resp.Diagnostics.Append(diags...)
-	state.Exclude = excludeSet
+	state.Exclude = excludeObj
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -598,17 +716,17 @@ func buildRateLimitKeys(keys []RateLimitKeyModel) []map[string]string {
 	return result
 }
 
-// extractTagFilter converts a Terraform set to an API RateLimitTagFilter.
-func extractTagFilter(ctx context.Context, set types.Set) (client.RateLimitTagFilter, diag.Diagnostics) {
-	var models []RateLimitTagFilterModel
-	diags := set.ElementsAs(ctx, &models, false)
+// extractTagFilter converts a Terraform object to an API RateLimitTagFilter.
+func extractTagFilter(ctx context.Context, obj types.Object) (client.RateLimitTagFilter, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if obj.IsNull() || obj.IsUnknown() {
+		return client.RateLimitTagFilter{Relation: "OR", Tags: []string{}}, diags
+	}
+	var model RateLimitTagFilterModel
+	diags.Append(obj.As(ctx, &model, basetypes.ObjectAsOptions{})...)
 	if diags.HasError() {
 		return client.RateLimitTagFilter{}, diags
 	}
-	if len(models) == 0 {
-		return client.RateLimitTagFilter{Relation: "OR", Tags: []string{}}, diags
-	}
-	model := models[0]
 	var tags []string
 	diags.Append(model.Tags.ElementsAs(ctx, &tags, false)...)
 	return client.RateLimitTagFilter{
@@ -617,25 +735,42 @@ func extractTagFilter(ctx context.Context, set types.Set) (client.RateLimitTagFi
 	}, diags
 }
 
-// tagFilterToSet converts an API RateLimitTagFilter to a Terraform set.
-func tagFilterToSet(ctx context.Context, filter client.RateLimitTagFilter) (types.Set, diag.Diagnostics) {
+// tagFilterSetToObject converts a legacy schema version 0 set (containing at most one tag filter
+// object) into the single object used by the current schema.
+func tagFilterSetToObject(ctx context.Context, set types.Set) (types.Object, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if set.IsNull() || set.IsUnknown() || len(set.Elements()) == 0 {
+		return types.ObjectNull(tagFilterAttrTypes), diags
+	}
+
+	var models []RateLimitTagFilterModel
+	diags.Append(set.ElementsAs(ctx, &models, false)...)
+	if diags.HasError() || len(models) == 0 {
+		return types.ObjectNull(tagFilterAttrTypes), diags
+	}
+
+	obj, d := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
+		"relation": models[0].Relation,
+		"tags":     models[0].Tags,
+	})
+	diags.Append(d...)
+	return obj, diags
+}
+
+// tagFilterToObject converts an API RateLimitTagFilter to a Terraform object.
+func tagFilterToObject(ctx context.Context, filter client.RateLimitTagFilter) (types.Object, diag.Diagnostics) {
 	tags := filter.Tags
 	if tags == nil {
 		tags = []string{}
 	}
 	tagsList, diags := types.ListValueFrom(ctx, types.StringType, tags)
 	if diags.HasError() {
-		return types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}), diags
+		return types.ObjectNull(tagFilterAttrTypes), diags
 	}
 	obj, d := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
 		"relation": types.StringValue(filter.Relation),
 		"tags":     tagsList,
 	})
 	diags.Append(d...)
-	if diags.HasError() {
-		return types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}), diags
-	}
-	set, d := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{obj})
-	diags.Append(d...)
-	return set, diags
+	return obj, diags
 }

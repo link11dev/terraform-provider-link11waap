@@ -6,7 +6,11 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 )
 
@@ -427,54 +431,54 @@ func TestRateLimitRuleResource_ImportState_TooManyParts(t *testing.T) {
 	}
 }
 
-func TestTagFilterToSet_WithTags(t *testing.T) {
+func TestTagFilterToObject_WithTags(t *testing.T) {
 	ctx := context.Background()
 	filter := client.RateLimitTagFilter{
 		Relation: "OR",
 		Tags:     []string{"tag1", "tag2"},
 	}
 
-	result, diags := tagFilterToSet(ctx, filter)
+	result, diags := tagFilterToObject(ctx, filter)
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
 	if result.IsNull() {
-		t.Fatal("expected non-null set")
+		t.Fatal("expected non-null object")
 	}
 }
 
-func TestTagFilterToSet_NilTags(t *testing.T) {
+func TestTagFilterToObject_NilTags(t *testing.T) {
 	ctx := context.Background()
 	filter := client.RateLimitTagFilter{
 		Relation: "AND",
 		Tags:     nil,
 	}
 
-	result, diags := tagFilterToSet(ctx, filter)
+	result, diags := tagFilterToObject(ctx, filter)
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
 	if result.IsNull() {
-		t.Fatal("expected non-null set even with nil tags")
+		t.Fatal("expected non-null object even with nil tags")
 	}
 }
 
-func TestTagFilterToSet_EmptyTags(t *testing.T) {
+func TestTagFilterToObject_EmptyTags(t *testing.T) {
 	ctx := context.Background()
 	filter := client.RateLimitTagFilter{
 		Relation: "OR",
 		Tags:     []string{},
 	}
 
-	result, diags := tagFilterToSet(ctx, filter)
+	result, diags := tagFilterToObject(ctx, filter)
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
 	if result.IsNull() {
-		t.Fatal("expected non-null set")
+		t.Fatal("expected non-null object")
 	}
 }
 
@@ -492,14 +496,13 @@ func mustRateLimitKeyList(t *testing.T, keys []RateLimitKeyModel) types.List {
 func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 	ctx := context.Background()
 
-	// Create include/exclude sets
+	// Create include/exclude objects
 	tagsList, _ := types.ListValueFrom(ctx, types.StringType, []string{"tag1"})
 	includeObj, _ := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
 		"relation": types.StringValue("OR"),
 		"tags":     tagsList,
 	})
-	includeSet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{includeObj})
-	excludeSet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{includeObj})
+	excludeObj := includeObj
 
 	plan := &RateLimitRuleResourceModel{
 		ID:          types.StringValue("rl-1"),
@@ -517,8 +520,8 @@ func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
-		Include:  includeSet,
-		Exclude:  excludeSet,
+		Include:  includeObj,
+		Exclude:  excludeObj,
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -556,7 +559,6 @@ func TestBuildRateLimitRuleAPIModel_NullPairwith(t *testing.T) {
 		"relation": types.StringValue("OR"),
 		"tags":     emptyTagsList,
 	})
-	emptySet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{emptyObj})
 
 	plan := &RateLimitRuleResourceModel{
 		ID:          types.StringValue("rl-2"),
@@ -574,8 +576,8 @@ func TestBuildRateLimitRuleAPIModel_NullPairwith(t *testing.T) {
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		}),
 		Pairwith: types.StringNull(),
-		Include:  emptySet,
-		Exclude:  emptySet,
+		Include:  emptyObj,
+		Exclude:  emptyObj,
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -605,7 +607,6 @@ func TestBuildRateLimitRuleAPIModel_WithTags(t *testing.T) {
 		"relation": types.StringValue("OR"),
 		"tags":     emptyTagsList,
 	})
-	emptySet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{emptyObj})
 
 	plan := &RateLimitRuleResourceModel{
 		ID:          types.StringValue("rl-3"),
@@ -623,8 +624,8 @@ func TestBuildRateLimitRuleAPIModel_WithTags(t *testing.T) {
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
-		Include:  emptySet,
-		Exclude:  emptySet,
+		Include:  emptyObj,
+		Exclude:  emptyObj,
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -648,5 +649,99 @@ func TestTagFilterAttrTypes(t *testing.T) {
 	}
 	if len(tagFilterAttrTypes) != 2 {
 		t.Errorf("expected 2 attr types, got %d", len(tagFilterAttrTypes))
+	}
+}
+
+func TestRateLimitRuleResource_UpgradeState_V0ToV1(t *testing.T) {
+	ctx := context.Background()
+	r := &RateLimitRuleResource{}
+
+	upgraders := r.UpgradeState(ctx)
+	upgrader, ok := upgraders[0]
+	if !ok || upgrader.PriorSchema == nil {
+		t.Fatal("expected a version 0 state upgrader with a prior schema")
+	}
+
+	objType := tftypes.Object{AttributeTypes: map[string]tftypes.Type{
+		"relation": tftypes.String,
+		"tags":     tftypes.List{ElementType: tftypes.String},
+	}}
+	listType := tftypes.List{ElementType: tftypes.String}
+
+	priorTFType := upgrader.PriorSchema.Type().TerraformType(ctx)
+	priorObjType, ok := priorTFType.(tftypes.Object)
+	if !ok {
+		t.Fatalf("expected prior schema to produce a tftypes.Object, got %T", priorTFType)
+	}
+
+	keyBlockType, ok := priorObjType.AttributeTypes["key"].(tftypes.List)
+	if !ok {
+		t.Fatalf("expected 'key' to be a tftypes.List, got %T", priorObjType.AttributeTypes["key"])
+	}
+
+	values := make(map[string]tftypes.Value, len(priorObjType.AttributeTypes))
+	for name, at := range priorObjType.AttributeTypes {
+		values[name] = tftypes.NewValue(at, nil)
+	}
+	values["config_id"] = tftypes.NewValue(tftypes.String, "cfg1")
+	values["id"] = tftypes.NewValue(tftypes.String, "rl1")
+	values["name"] = tftypes.NewValue(tftypes.String, "test-rule")
+	values["description"] = tftypes.NewValue(tftypes.String, "")
+	values["global"] = tftypes.NewValue(tftypes.Bool, false)
+	values["active"] = tftypes.NewValue(tftypes.Bool, true)
+	values["timeframe"] = tftypes.NewValue(tftypes.Number, 60)
+	values["threshold"] = tftypes.NewValue(tftypes.Number, 100)
+	values["ttl"] = tftypes.NewValue(tftypes.Number, 300)
+	values["action"] = tftypes.NewValue(tftypes.String, "action-monitor")
+	values["is_action_ban"] = tftypes.NewValue(tftypes.Bool, false)
+	values["pairwith"] = tftypes.NewValue(tftypes.String, `{"self":"self"}`)
+	values["key"] = tftypes.NewValue(keyBlockType, []tftypes.Value{})
+	values["include"] = tftypes.NewValue(tftypes.Set{ElementType: objType}, []tftypes.Value{
+		tftypes.NewValue(objType, map[string]tftypes.Value{
+			"relation": tftypes.NewValue(tftypes.String, "OR"),
+			"tags":     tftypes.NewValue(listType, []tftypes.Value{tftypes.NewValue(tftypes.String, "facebook")}),
+		}),
+	})
+	values["exclude"] = tftypes.NewValue(tftypes.Set{ElementType: objType}, []tftypes.Value{})
+
+	priorState := tfsdk.State{
+		Schema: *upgrader.PriorSchema,
+		Raw:    tftypes.NewValue(priorTFType, values),
+	}
+
+	sReq := schemaReq()
+	sResp := schemaResp()
+	r.Schema(ctx, sReq, sResp)
+
+	req := resource.UpgradeStateRequest{State: &priorState}
+	resp := &resource.UpgradeStateResponse{
+		State: tfsdk.State{Schema: sResp.Schema},
+	}
+
+	upgrader.StateUpgrader(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("unexpected diags: %v", resp.Diagnostics)
+	}
+
+	var upgraded RateLimitRuleResourceModel
+	if diags := resp.State.Get(ctx, &upgraded); diags.HasError() {
+		t.Fatalf("unexpected diags reading upgraded state: %v", diags)
+	}
+
+	if upgraded.Include.IsNull() {
+		t.Fatal("expected non-null include object after upgrade")
+	}
+	var includeModel RateLimitTagFilterModel
+	if diags := upgraded.Include.As(ctx, &includeModel, basetypes.ObjectAsOptions{}); diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	var includeTags []string
+	includeModel.Tags.ElementsAs(ctx, &includeTags, false)
+	if len(includeTags) != 1 || includeTags[0] != "facebook" {
+		t.Errorf("expected tags=['facebook'], got %v", includeTags)
+	}
+
+	if !upgraded.Exclude.IsNull() {
+		t.Error("expected exclude to be null after upgrading an empty legacy set")
 	}
 }
