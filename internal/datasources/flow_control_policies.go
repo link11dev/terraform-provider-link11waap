@@ -25,16 +25,16 @@ type FlowControlPoliciesDataSourceModel struct {
 
 // FlowControlPolicyDataModel describes the data model for a single flow control policy
 type FlowControlPolicyDataModel struct {
-	ID          types.String                        `tfsdk:"id"`
-	Name        types.String                        `tfsdk:"name"`
-	Description types.String                        `tfsdk:"description"`
-	Active      types.Bool                          `tfsdk:"active"`
-	Timeframe   types.Int64                         `tfsdk:"timeframe"`
-	Tags        types.List                          `tfsdk:"tags"`
-	Include     types.List                          `tfsdk:"include"`
-	Exclude     types.List                          `tfsdk:"exclude"`
-	Key         []providerutil.FlowControlKeyModel  `tfsdk:"key"`
-	Steps       []providerutil.FlowControlStepModel `tfsdk:"steps"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Active      types.Bool   `tfsdk:"active"`
+	Timeframe   types.Int64  `tfsdk:"timeframe"`
+	Tags        types.List   `tfsdk:"tags"`
+	Include     types.List   `tfsdk:"include"`
+	Exclude     types.List   `tfsdk:"exclude"`
+	Key         types.List   `tfsdk:"key"`
+	Steps       types.List   `tfsdk:"steps"`
 }
 
 // NewFlowControlPoliciesDataSource returns a new instance of the flow control policies data source
@@ -148,6 +148,11 @@ func (d *FlowControlPoliciesDataSource) Read(ctx context.Context, req datasource
 		excludeList, diags := types.ListValueFrom(ctx, types.StringType, exclude)
 		resp.Diagnostics.Append(diags...)
 
+		keys, diags := providerutil.ParseFlowControlKeys(ctx, p.Key)
+		resp.Diagnostics.Append(diags...)
+		steps, diags := providerutil.ParseFlowControlSteps(ctx, p.Steps)
+		resp.Diagnostics.Append(diags...)
+
 		data.FlowControlPolicies[i] = FlowControlPolicyDataModel{
 			ID:          types.StringValue(p.ID),
 			Name:        types.StringValue(p.Name),
@@ -157,8 +162,8 @@ func (d *FlowControlPoliciesDataSource) Read(ctx context.Context, req datasource
 			Tags:        tagsList,
 			Include:     includeList,
 			Exclude:     excludeList,
-			Key:         providerutil.ParseFlowControlKeys(p.Key),
-			Steps:       providerutil.ParseFlowControlSteps(ctx, p.Steps, &resp.Diagnostics),
+			Key:         keys,
+			Steps:       steps,
 		}
 	}
 
