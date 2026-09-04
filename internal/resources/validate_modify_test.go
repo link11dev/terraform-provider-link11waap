@@ -775,6 +775,36 @@ func TestBuildRateLimitRuleAPIModel_UnknownKey(t *testing.T) {
 	assert.Nil(t, rule.Key, "key should be left unset when the collection is unknown")
 }
 
+// TestBuildRateLimitRuleAPIModel_ResolvedEmptyKey ensures that once a
+// previously-unknown key collection resolves to zero entries (e.g. a
+// `dynamic` block whose `for_each` resolves empty), the builder raises a
+// Terraform-level diagnostic instead of silently omitting Key from the API
+// payload.
+func TestBuildRateLimitRuleAPIModel_ResolvedEmptyKey(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &RateLimitRuleResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Global:      types.BoolValue(false),
+		Active:      types.BoolValue(true),
+		Timeframe:   types.Int64Value(60),
+		Threshold:   types.Int64Value(100),
+		TTL:         types.Int64Value(0),
+		Action:      types.StringValue("action-monitor"),
+		IsActionBan: types.BoolValue(false),
+		Tags:        types.ListNull(types.StringType),
+		Key:         types.ListValueMust(rateLimitKeyModelType(), []attr.Value{}),
+		Pairwith:    types.StringValue(`{"self":"self"}`),
+		Include:     types.SetValueMust(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{}),
+		Exclude:     types.SetValueMust(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{}),
+	}
+
+	_, diags := buildRateLimitRuleAPIModel(ctx, plan)
+	require.True(t, diags.HasError(), "expected an error when the resolved key collection is empty")
+}
+
 // --- Publish Delete and getBuckets Tests ---
 
 func TestPublishResource_Delete_Invoked(t *testing.T) {

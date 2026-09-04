@@ -367,9 +367,13 @@ func TestBuildFlowControlPolicyAPIModel_NonNullExclude(t *testing.T) {
 		Tags:        types.ListNull(types.StringType),
 		Include:     types.ListNull(types.StringType),
 		Exclude:     exclude,
-		Key:         mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{}),
-		Steps:       mustFlowControlStepList(t, []providerutil.FlowControlStepModel{}),
-		ConfigID:    types.StringValue("cfg1"),
+		Key: mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{
+			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
+		}),
+		Steps: mustFlowControlStepList(t, []providerutil.FlowControlStepModel{
+			{Method: types.StringValue("GET"), URI: types.StringValue("/a"), Headers: types.MapNull(types.StringType), Cookies: types.MapNull(types.StringType), Args: types.MapNull(types.StringType), Plugins: types.MapNull(types.StringType)},
+		}),
+		ConfigID: types.StringValue("cfg1"),
 	}
 
 	policy, diags := buildFlowControlPolicyAPIModel(ctx, plan)
@@ -734,4 +738,29 @@ func TestBuildFlowControlPolicyAPIModel_UnknownKeyAndSteps(t *testing.T) {
 	require.False(t, diags.HasError(), "unexpected errors: %v", diags)
 	assert.Nil(t, policy.Key, "key should be left unset when the collection is unknown")
 	assert.Nil(t, policy.Steps, "steps should be left unset when the collection is unknown")
+}
+
+// TestBuildFlowControlPolicyAPIModel_ResolvedEmptyKeyAndSteps ensures that
+// once previously-unknown key/steps collections resolve to zero entries
+// (e.g. a `dynamic` block whose `for_each` resolves empty), the builder
+// raises Terraform-level diagnostics instead of silently omitting them from
+// the API payload.
+func TestBuildFlowControlPolicyAPIModel_ResolvedEmptyKeyAndSteps(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &FlowControlPolicyResourceModel{
+		ConfigID:    types.StringValue("cfg1"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Active:      types.BoolValue(true),
+		Timeframe:   types.Int64Value(60),
+		Tags:        types.ListNull(types.StringType),
+		Include:     types.ListNull(types.StringType),
+		Exclude:     types.ListNull(types.StringType),
+		Key:         mustFlowControlKeyList(t, []providerutil.FlowControlKeyModel{}),
+		Steps:       mustFlowControlStepList(t, []providerutil.FlowControlStepModel{}),
+	}
+
+	_, diags := buildFlowControlPolicyAPIModel(ctx, plan)
+	require.True(t, diags.HasError(), "expected errors when the resolved key/steps collections are empty")
 }

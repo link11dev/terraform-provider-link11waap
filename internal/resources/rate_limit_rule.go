@@ -501,12 +501,21 @@ func buildRateLimitRuleAPIModel(ctx context.Context, plan *RateLimitRuleResource
 	}
 
 	// Key (types.List -> []RateLimitKeyModel -> []map[string]string)
-	if !plan.Key.IsNull() && !plan.Key.IsUnknown() {
-		var keys []RateLimitKeyModel
-		diags.Append(plan.Key.ElementsAs(ctx, &keys, false)...)
-		if len(keys) > 0 {
-			rule.Key = buildRateLimitKeys(keys)
+	var keys []RateLimitKeyModel
+	if !plan.Key.IsUnknown() {
+		if !plan.Key.IsNull() {
+			diags.Append(plan.Key.ElementsAs(ctx, &keys, false)...)
 		}
+		if len(keys) == 0 {
+			diags.AddAttributeError(
+				path.Root("key"),
+				"Missing Required key Blocks",
+				"At least one 'key' block must be specified.",
+			)
+		}
+	}
+	if len(keys) > 0 {
+		rule.Key = buildRateLimitKeys(keys)
 	}
 
 	// Pairwith (JSON string -> interface{})
