@@ -690,12 +690,34 @@ func buildSecurityPolicyAPIModel(ctx context.Context, plan *SecurityPolicyResour
 	if !plan.Session.IsNull() && !plan.Session.IsUnknown() {
 		diags.Append(plan.Session.ElementsAs(ctx, &sessions, false)...)
 	}
+	if len(sessions) != 1 {
+		diags.AddAttributeError(
+			path.Root("session"),
+			"Invalid session Configuration",
+			"Exactly one 'session' block must be specified.",
+		)
+	} else if countSessionKeyFields(sessions[0]) != 1 {
+		diags.AddAttributeError(
+			path.Root("session").AtListIndex(0),
+			"Invalid session block",
+			"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'session' block.",
+		)
+	}
 	sp.Session = buildSessionKeys(sessions)
 
 	// SessionIDs
 	var sessionIDs []SessionKeyModel
 	if !plan.SessionIDs.IsNull() && !plan.SessionIDs.IsUnknown() {
 		diags.Append(plan.SessionIDs.ElementsAs(ctx, &sessionIDs, false)...)
+	}
+	for i, s := range sessionIDs {
+		if countSessionKeyFields(s) != 1 {
+			diags.AddAttributeError(
+				path.Root("session_ids").AtListIndex(i),
+				"Invalid session_ids block",
+				"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'session_ids' block.",
+			)
+		}
 	}
 	if len(sessionIDs) == 0 {
 		sp.SessionIDs = []map[string]string{}

@@ -131,7 +131,10 @@ func TestBuildSecProfileMapEntry_EmptySlice(t *testing.T) {
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
 		Map:         mustSecProfileMapSet(t, models),
-		ConfigID:    types.StringValue("config-1"),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
+			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
+		}),
+		ConfigID: types.StringValue("config-1"),
 	}
 
 	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
@@ -183,8 +186,9 @@ func TestBuildSecProfileMapEntries_MultipleEntries(t *testing.T) {
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
 		Map:         mustSecProfileMapSet(t, models),
-		// Session:     types.StringNull(),
-		// c:  types.StringNull(),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
+			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
+		}),
 		ConfigID: types.StringValue("config-1"),
 	}
 
@@ -942,9 +946,11 @@ func TestBuildSecurityPolicyAPIModel_NullTags(t *testing.T) {
 		Description: types.StringValue(""),
 		Tags:        types.ListNull(types.StringType),
 		Map:         mustSecProfileMapSet(t, nil),
-		Session:     mustSessionKeyList(t, nil),
-		SessionIDs:  mustSessionKeyList(t, nil),
-		ConfigID:    types.StringValue("cfg1"),
+		Session: mustSessionKeyList(t, []SessionKeyModel{
+			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
+		}),
+		SessionIDs: mustSessionKeyList(t, nil),
+		ConfigID:   types.StringValue("cfg1"),
 	}
 
 	sp, diags := buildSecurityPolicyAPIModel(ctx, plan)
@@ -954,6 +960,30 @@ func TestBuildSecurityPolicyAPIModel_NullTags(t *testing.T) {
 
 	if sp.Tags != nil {
 		t.Errorf("expected nil tags, got %v", sp.Tags)
+	}
+}
+
+// TestBuildSecurityPolicyAPIModel_ResolvedEmptySession ensures that once a
+// previously-unknown session collection resolves to zero entries (e.g. a
+// `dynamic` block whose `for_each` resolves empty), the builder raises a
+// Terraform-level diagnostic instead of sending an invalid session to the API.
+func TestBuildSecurityPolicyAPIModel_ResolvedEmptySession(t *testing.T) {
+	ctx := context.Background()
+
+	plan := &SecurityPolicyResourceModel{
+		ID:          types.StringValue("sp-4"),
+		Name:        types.StringValue("test"),
+		Description: types.StringValue(""),
+		Tags:        types.ListNull(types.StringType),
+		Map:         mustSecProfileMapSet(t, nil),
+		Session:     mustSessionKeyList(t, nil),
+		SessionIDs:  mustSessionKeyList(t, nil),
+		ConfigID:    types.StringValue("cfg1"),
+	}
+
+	_, diags := buildSecurityPolicyAPIModel(ctx, plan)
+	if !diags.HasError() {
+		t.Fatal("expected an error when the resolved session collection is empty")
 	}
 }
 

@@ -466,16 +466,38 @@ func buildFlowControlPolicyAPIModel(ctx context.Context, plan *FlowControlPolicy
 	}
 
 	// Key
-	if !plan.Key.IsNull() && !plan.Key.IsUnknown() {
-		var keys []providerutil.FlowControlKeyModel
-		diags.Append(plan.Key.ElementsAs(ctx, &keys, false)...)
+	var keys []providerutil.FlowControlKeyModel
+	if !plan.Key.IsUnknown() {
+		if !plan.Key.IsNull() {
+			diags.Append(plan.Key.ElementsAs(ctx, &keys, false)...)
+		}
+		if len(keys) == 0 {
+			diags.AddAttributeError(
+				path.Root("key"),
+				"Missing Required key Blocks",
+				"At least one 'key' block must be specified.",
+			)
+		}
+	}
+	if len(keys) > 0 {
 		policy.Key = buildFlowControlKeys(keys)
 	}
 
 	// Steps
-	if !plan.Steps.IsNull() && !plan.Steps.IsUnknown() {
-		var steps []providerutil.FlowControlStepModel
-		diags.Append(plan.Steps.ElementsAs(ctx, &steps, false)...)
+	var steps []providerutil.FlowControlStepModel
+	if !plan.Steps.IsUnknown() {
+		if !plan.Steps.IsNull() {
+			diags.Append(plan.Steps.ElementsAs(ctx, &steps, false)...)
+		}
+		if len(steps) == 0 {
+			diags.AddAttributeError(
+				path.Root("steps"),
+				"Missing Required steps Blocks",
+				"At least one 'steps' block must be specified.",
+			)
+		}
+	}
+	if len(steps) > 0 {
 		policy.Steps = buildFlowControlSteps(ctx, steps, &diags)
 	}
 
