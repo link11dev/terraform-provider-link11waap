@@ -3,6 +3,7 @@ package providerutil
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
@@ -27,9 +28,38 @@ type FlowControlStepModel struct {
 	Plugins types.Map    `tfsdk:"plugins"`
 }
 
-// ParseFlowControlKeys converts []client.FlowControlKeyEntry to []FlowControlKeyModel.
-func ParseFlowControlKeys(keys []client.FlowControlKeyEntry) []FlowControlKeyModel {
-	result := make([]FlowControlKeyModel, 0, len(keys))
+// FlowControlKeyModelType is the object type matching FlowControlKeyModel, used to
+// convert between types.List and []FlowControlKeyModel. Exported because the key
+// and steps blocks are represented as types.List (not native Go slices) on
+// FlowControlPolicyResourceModel: the framework's reflection-based decoding cannot
+// represent an unknown value in a plain slice, and Terraform produces unknown
+// collections for blocks generated via `dynamic`.
+func FlowControlKeyModelType() types.ObjectType {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"attrs":   types.StringType,
+		"args":    types.StringType,
+		"plugins": types.StringType,
+		"cookies": types.StringType,
+		"headers": types.StringType,
+	}}
+}
+
+// FlowControlStepModelType is the object type matching FlowControlStepModel, used
+// to convert between types.List and []FlowControlStepModel.
+func FlowControlStepModelType() types.ObjectType {
+	return types.ObjectType{AttrTypes: map[string]attr.Type{
+		"method":  types.StringType,
+		"uri":     types.StringType,
+		"headers": types.MapType{ElemType: types.StringType},
+		"cookies": types.MapType{ElemType: types.StringType},
+		"args":    types.MapType{ElemType: types.StringType},
+		"plugins": types.MapType{ElemType: types.StringType},
+	}}
+}
+
+// ParseFlowControlKeys converts []client.FlowControlKeyEntry to a non-null types.List.
+func ParseFlowControlKeys(ctx context.Context, keys []client.FlowControlKeyEntry) (types.List, diag.Diagnostics) {
+	models := make([]FlowControlKeyModel, 0, len(keys))
 	for _, k := range keys {
 		km := FlowControlKeyModel{
 			Attrs:   types.StringNull(),
@@ -50,14 +80,15 @@ func ParseFlowControlKeys(keys []client.FlowControlKeyEntry) []FlowControlKeyMod
 		case k.Headers != nil:
 			km.Headers = types.StringValue(*k.Headers)
 		}
-		result = append(result, km)
+		models = append(models, km)
 	}
-	return result
+	return types.ListValueFrom(ctx, FlowControlKeyModelType(), models)
 }
 
-// ParseFlowControlSteps converts []client.FlowStepItem to []FlowControlStepModel.
-func ParseFlowControlSteps(ctx context.Context, steps []client.FlowStepItem, diags *diag.Diagnostics) []FlowControlStepModel {
-	result := make([]FlowControlStepModel, 0, len(steps))
+// ParseFlowControlSteps converts []client.FlowStepItem to a non-null types.List.
+func ParseFlowControlSteps(ctx context.Context, steps []client.FlowStepItem) (types.List, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	models := make([]FlowControlStepModel, 0, len(steps))
 	for _, s := range steps {
 		sm := FlowControlStepModel{
 			Method:  types.StringValue(s.Method),
@@ -87,7 +118,9 @@ func ParseFlowControlSteps(ctx context.Context, steps []client.FlowStepItem, dia
 			diags.Append(d...)
 			sm.Plugins = m
 		}
-		result = append(result, sm)
+		models = append(models, sm)
 	}
-	return result
+	list, d := types.ListValueFrom(ctx, FlowControlStepModelType(), models)
+	diags.Append(d...)
+	return list, diags
 }

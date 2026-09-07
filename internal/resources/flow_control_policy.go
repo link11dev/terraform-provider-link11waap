@@ -46,19 +46,24 @@ type FlowControlPolicyResource struct {
 	client *client.Client
 }
 
-// FlowControlPolicyResourceModel describes the resource model for a flow control policy
+// FlowControlPolicyResourceModel describes the resource model for a flow control policy.
+//
+// Key and Steps are types.List (not native Go slices): the framework's
+// reflection-based decoding cannot represent an unknown value in a plain
+// slice, and Terraform produces unknown collections for blocks generated via
+// `dynamic`.
 type FlowControlPolicyResourceModel struct {
-	ConfigID    types.String                        `tfsdk:"config_id"`
-	ID          types.String                        `tfsdk:"id"`
-	Name        types.String                        `tfsdk:"name"`
-	Description types.String                        `tfsdk:"description"`
-	Active      types.Bool                          `tfsdk:"active"`
-	Timeframe   types.Int64                         `tfsdk:"timeframe"`
-	Tags        types.List                          `tfsdk:"tags"`
-	Include     types.List                          `tfsdk:"include"`
-	Exclude     types.List                          `tfsdk:"exclude"`
-	Key         []providerutil.FlowControlKeyModel  `tfsdk:"key"`
-	Steps       []providerutil.FlowControlStepModel `tfsdk:"steps"`
+	ConfigID    types.String `tfsdk:"config_id"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Active      types.Bool   `tfsdk:"active"`
+	Timeframe   types.Int64  `tfsdk:"timeframe"`
+	Tags        types.List   `tfsdk:"tags"`
+	Include     types.List   `tfsdk:"include"`
+	Exclude     types.List   `tfsdk:"exclude"`
+	Key         types.List   `tfsdk:"key"`
+	Steps       types.List   `tfsdk:"steps"`
 }
 
 // NewFlowControlPolicyResource returns a new instance of the flow control policy resource
@@ -291,10 +296,14 @@ func (r *FlowControlPolicyResource) Read(ctx context.Context, req resource.ReadR
 	state.Exclude = excludeList
 
 	// Key
-	state.Key = providerutil.ParseFlowControlKeys(policy.Key)
+	keyList, diags := providerutil.ParseFlowControlKeys(ctx, policy.Key)
+	resp.Diagnostics.Append(diags...)
+	state.Key = keyList
 
 	// Steps
-	state.Steps = providerutil.ParseFlowControlSteps(ctx, policy.Steps, &resp.Diagnostics)
+	stepsList, diags := providerutil.ParseFlowControlSteps(ctx, policy.Steps)
+	resp.Diagnostics.Append(diags...)
+	state.Steps = stepsList
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -366,45 +375,65 @@ func (r *FlowControlPolicyResource) ValidateConfig(ctx context.Context, req reso
 		return
 	}
 
-	if len(config.Key) == 0 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("key"),
-			"Missing Required key Blocks",
-			"At least one 'key' block must be specified.",
-		)
-	}
-	for i, k := range config.Key {
-		setCount := 0
-		if !k.Attrs.IsNull() && !k.Attrs.IsUnknown() {
-			setCount++
+	if !config.Key.IsUnknown() {
+		var keys []providerutil.FlowControlKeyModel
+		if !config.Key.IsNull() {
+			resp.Diagnostics.Append(config.Key.ElementsAs(ctx, &keys, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
 		}
-		if !k.Args.IsNull() && !k.Args.IsUnknown() {
-			setCount++
-		}
-		if !k.Plugins.IsNull() && !k.Plugins.IsUnknown() {
-			setCount++
-		}
-		if !k.Cookies.IsNull() && !k.Cookies.IsUnknown() {
-			setCount++
-		}
-		if !k.Headers.IsNull() && !k.Headers.IsUnknown() {
-			setCount++
-		}
-		if setCount != 1 {
+
+		if len(keys) == 0 {
 			resp.Diagnostics.AddAttributeError(
-				path.Root("key").AtListIndex(i),
-				"Invalid key block",
-				"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'key' block.",
+				path.Root("key"),
+				"Missing Required key Blocks",
+				"At least one 'key' block must be specified.",
 			)
+		}
+		for i, k := range keys {
+			setCount := 0
+			if !k.Attrs.IsNull() && !k.Attrs.IsUnknown() {
+				setCount++
+			}
+			if !k.Args.IsNull() && !k.Args.IsUnknown() {
+				setCount++
+			}
+			if !k.Plugins.IsNull() && !k.Plugins.IsUnknown() {
+				setCount++
+			}
+			if !k.Cookies.IsNull() && !k.Cookies.IsUnknown() {
+				setCount++
+			}
+			if !k.Headers.IsNull() && !k.Headers.IsUnknown() {
+				setCount++
+			}
+			if setCount != 1 {
+				resp.Diagnostics.AddAttributeError(
+					path.Root("key").AtListIndex(i),
+					"Invalid key block",
+					"Exactly one of attrs, args, plugins, cookies, or headers must be set in each 'key' block.",
+				)
+			}
 		}
 	}
 
-	if len(config.Steps) == 0 {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("steps"),
-			"Missing Required steps Blocks",
-			"At least one 'steps' block must be specified.",
-		)
+	if !config.Steps.IsUnknown() {
+		var steps []providerutil.FlowControlStepModel
+		if !config.Steps.IsNull() {
+			resp.Diagnostics.Append(config.Steps.ElementsAs(ctx, &steps, false)...)
+			if resp.Diagnostics.HasError() {
+				return
+			}
+		}
+
+		if len(steps) == 0 {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("steps"),
+				"Missing Required steps Blocks",
+				"At least one 'steps' block must be specified.",
+			)
+		}
 	}
 }
 
@@ -437,10 +466,40 @@ func buildFlowControlPolicyAPIModel(ctx context.Context, plan *FlowControlPolicy
 	}
 
 	// Key
-	policy.Key = buildFlowControlKeys(plan.Key)
+	var keys []providerutil.FlowControlKeyModel
+	if !plan.Key.IsUnknown() {
+		if !plan.Key.IsNull() {
+			diags.Append(plan.Key.ElementsAs(ctx, &keys, false)...)
+		}
+		if len(keys) == 0 {
+			diags.AddAttributeError(
+				path.Root("key"),
+				"Missing Required key Blocks",
+				"At least one 'key' block must be specified.",
+			)
+		}
+	}
+	if len(keys) > 0 {
+		policy.Key = buildFlowControlKeys(keys)
+	}
 
 	// Steps
-	policy.Steps = buildFlowControlSteps(ctx, plan.Steps, &diags)
+	var steps []providerutil.FlowControlStepModel
+	if !plan.Steps.IsUnknown() {
+		if !plan.Steps.IsNull() {
+			diags.Append(plan.Steps.ElementsAs(ctx, &steps, false)...)
+		}
+		if len(steps) == 0 {
+			diags.AddAttributeError(
+				path.Root("steps"),
+				"Missing Required steps Blocks",
+				"At least one 'steps' block must be specified.",
+			)
+		}
+	}
+	if len(steps) > 0 {
+		policy.Steps = buildFlowControlSteps(ctx, steps, &diags)
+	}
 
 	return policy, diags
 }

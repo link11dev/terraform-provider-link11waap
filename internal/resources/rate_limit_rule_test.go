@@ -478,6 +478,45 @@ func TestTagFilterToSet_EmptyTags(t *testing.T) {
 	}
 }
 
+func TestExtractTagFilter_UnknownSet(t *testing.T) {
+	ctx := context.Background()
+	set := types.SetUnknown(types.ObjectType{AttrTypes: tagFilterAttrTypes})
+
+	result, diags := extractTagFilter(ctx, set)
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error for unknown set: %v", diags)
+	}
+	if result.Relation != "OR" || len(result.Tags) != 0 {
+		t.Fatalf("expected default OR filter with no tags, got %+v", result)
+	}
+}
+
+func TestExtractTagFilter_NullSet(t *testing.T) {
+	ctx := context.Background()
+	set := types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes})
+
+	result, diags := extractTagFilter(ctx, set)
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error for null set: %v", diags)
+	}
+	if result.Relation != "OR" || len(result.Tags) != 0 {
+		t.Fatalf("expected default OR filter with no tags, got %+v", result)
+	}
+}
+
+// mustRateLimitKeyList builds a types.List of RateLimitKeyModel for use in
+// RateLimitRuleResourceModel literals.
+func mustRateLimitKeyList(t *testing.T, keys []RateLimitKeyModel) types.List {
+	t.Helper()
+	l, diags := rateLimitKeyModelsToList(context.Background(), keys)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	return l
+}
+
 func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 	ctx := context.Background()
 
@@ -502,9 +541,9 @@ func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		IsActionBan: types.BoolValue(false),
 		Tags:        types.ListNull(types.StringType),
-		Key: []RateLimitKeyModel{
+		Key: mustRateLimitKeyList(t, []RateLimitKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
+		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
 		Include:  includeSet,
 		Exclude:  excludeSet,
@@ -559,9 +598,9 @@ func TestBuildRateLimitRuleAPIModel_NullPairwith(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		IsActionBan: types.BoolValue(false),
 		Tags:        types.ListNull(types.StringType),
-		Key: []RateLimitKeyModel{
+		Key: mustRateLimitKeyList(t, []RateLimitKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
+		}),
 		Pairwith: types.StringNull(),
 		Include:  emptySet,
 		Exclude:  emptySet,
@@ -608,9 +647,9 @@ func TestBuildRateLimitRuleAPIModel_WithTags(t *testing.T) {
 		Action:      types.StringValue("action-monitor"),
 		IsActionBan: types.BoolValue(false),
 		Tags:        tags,
-		Key: []RateLimitKeyModel{
+		Key: mustRateLimitKeyList(t, []RateLimitKeyModel{
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
-		},
+		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
 		Include:  emptySet,
 		Exclude:  emptySet,
