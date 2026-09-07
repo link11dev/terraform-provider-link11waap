@@ -804,6 +804,9 @@ func resolveSiteLevelMap(planMaps, priorMaps []SecProfileMapModel) []SecProfileM
 	}
 
 	for i, m := range result {
+		if m.ID.IsUnknown() {
+			continue
+		}
 		if m.ID.ValueString() == siteLevelMapID {
 			locked := baseline
 			if !m.RateLimitRules.IsNull() {
