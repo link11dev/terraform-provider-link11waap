@@ -478,6 +478,34 @@ func TestTagFilterToSet_EmptyTags(t *testing.T) {
 	}
 }
 
+func TestExtractTagFilter_UnknownSet(t *testing.T) {
+	ctx := context.Background()
+	set := types.SetUnknown(types.ObjectType{AttrTypes: tagFilterAttrTypes})
+
+	result, diags := extractTagFilter(ctx, set)
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error for unknown set: %v", diags)
+	}
+	if result.Relation != "OR" || len(result.Tags) != 0 {
+		t.Fatalf("expected default OR filter with no tags, got %+v", result)
+	}
+}
+
+func TestExtractTagFilter_NullSet(t *testing.T) {
+	ctx := context.Background()
+	set := types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes})
+
+	result, diags := extractTagFilter(ctx, set)
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error for null set: %v", diags)
+	}
+	if result.Relation != "OR" || len(result.Tags) != 0 {
+		t.Fatalf("expected default OR filter with no tags, got %+v", result)
+	}
+}
+
 // mustRateLimitKeyList builds a types.List of RateLimitKeyModel for use in
 // RateLimitRuleResourceModel literals.
 func mustRateLimitKeyList(t *testing.T, keys []RateLimitKeyModel) types.List {

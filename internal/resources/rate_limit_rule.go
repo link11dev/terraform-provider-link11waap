@@ -600,8 +600,12 @@ func buildRateLimitKeys(keys []RateLimitKeyModel) []map[string]string {
 
 // extractTagFilter converts a Terraform set to an API RateLimitTagFilter.
 func extractTagFilter(ctx context.Context, set types.Set) (client.RateLimitTagFilter, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	if set.IsNull() || set.IsUnknown() {
+		return client.RateLimitTagFilter{Relation: "OR", Tags: []string{}}, diags
+	}
 	var models []RateLimitTagFilterModel
-	diags := set.ElementsAs(ctx, &models, false)
+	diags = set.ElementsAs(ctx, &models, false)
 	if diags.HasError() {
 		return client.RateLimitTagFilter{}, diags
 	}
