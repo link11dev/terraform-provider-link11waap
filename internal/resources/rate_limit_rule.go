@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -16,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 	"github.com/link11/terraform-provider-link11waap/internal/providerutil"
@@ -26,6 +24,7 @@ var (
 	_ resource.Resource                   = &RateLimitRuleResource{}
 	_ resource.ResourceWithImportState    = &RateLimitRuleResource{}
 	_ resource.ResourceWithValidateConfig = &RateLimitRuleResource{}
+	_ resource.ResourceWithUpgradeState   = &RateLimitRuleResource{}
 )
 
 // RateLimitRuleResource implements the resource for managing a rate limit rule
@@ -54,8 +53,8 @@ type RateLimitRuleResourceModel struct {
 	Tags        types.List   `tfsdk:"tags"`
 	Key         types.List   `tfsdk:"key"`
 	Pairwith    types.String `tfsdk:"pairwith"`
-	Include     types.Set    `tfsdk:"include"`
-	Exclude     types.Set    `tfsdk:"exclude"`
+	Include     types.Object `tfsdk:"include"`
+	Exclude     types.Object `tfsdk:"exclude"`
 	// LastActivated types.Int64         `tfsdk:"last_activated"`
 }
 
@@ -89,18 +88,6 @@ func rateLimitKeyModelsToList(ctx context.Context, models []RateLimitKeyModel) (
 	return types.ListValueFrom(ctx, rateLimitKeyModelType(), models)
 }
 
-// RateLimitTagFilterModel describes the data model for a rate limit tag filter (include/exclude)
-type RateLimitTagFilterModel struct {
-	Relation types.String `tfsdk:"relation"`
-	Tags     types.List   `tfsdk:"tags"`
-}
-
-// tagFilterAttrTypes defines the attribute types for a tag filter object
-var tagFilterAttrTypes = map[string]attr.Type{
-	"relation": types.StringType,
-	"tags":     types.ListType{ElemType: types.StringType},
-}
-
 // NewRateLimitRuleResource returns a new instance of the rate limit rule resource
 func NewRateLimitRuleResource() resource.Resource {
 	return &RateLimitRuleResource{}
@@ -114,6 +101,7 @@ func (r *RateLimitRuleResource) Metadata(_ context.Context, req resource.Metadat
 // Schema defines the schema for the rate limit rule resource
 func (r *RateLimitRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version:     rateLimitRuleSchemaVersion,
 		Description: "Manages a Rate Limit Rule in Link11 WAAP.",
 		Attributes: map[string]schema.Attribute{
 			"config_id": schema.StringAttribute{
@@ -215,44 +203,12 @@ func (r *RateLimitRuleResource) Schema(_ context.Context, _ resource.SchemaReque
 					},
 				},
 			},
-			"include": schema.SetNestedBlock{
-				Description: "Include filter: requests matching these tags are counted.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
-						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
-					},
-				},
-			},
-			"exclude": schema.SetNestedBlock{
-				Description: "Exclude filter: requests matching these tags are excluded from counting.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
-						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
-					},
-				},
-			},
+			"include": tagFilterBlockSchema(
+				"Include filter: requests matching these tags are counted. At most one block.",
+			),
+			"exclude": tagFilterBlockSchema(
+				"Exclude filter: requests matching these tags are excluded from counting. At most one block.",
+			),
 		},
 	}
 }
@@ -349,14 +305,14 @@ func (r *RateLimitRuleResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Include
-	includeSet, diags := tagFilterToSet(ctx, rule.Include)
+	includeObj, diags := tagFilterToObject(ctx, rule.Include)
 	resp.Diagnostics.Append(diags...)
-	state.Include = includeSet
+	state.Include = includeObj
 
 	// Exclude
-	excludeSet, diags := tagFilterToSet(ctx, rule.Exclude)
+	excludeObj, diags := tagFilterToObject(ctx, rule.Exclude)
 	resp.Diagnostics.Append(diags...)
-	state.Exclude = excludeSet
+	state.Exclude = excludeObj
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -420,13 +376,19 @@ func (r *RateLimitRuleResource) ImportState(ctx context.Context, req resource.Im
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
 }
 
-// ValidateConfig validates that at least one key block is specified and each block has exactly one field set.
+// ValidateConfig validates that at least one key block is specified, that each key block has
+// exactly one field set, and that any include/exclude block is fully populated.
 func (r *RateLimitRuleResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
 	var config RateLimitRuleResourceModel
 	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	// include/exclude are optional for this resource, but must be complete when written.
+	validateTagFilterBlock(ctx, config.Include, path.Root("include"), false, &resp.Diagnostics)
+	validateTagFilterBlock(ctx, config.Exclude, path.Root("exclude"), false, &resp.Diagnostics)
+
 	if config.Key.IsUnknown() {
 		return
 	}
@@ -596,50 +558,4 @@ func buildRateLimitKeys(keys []RateLimitKeyModel) []map[string]string {
 		}
 	}
 	return result
-}
-
-// extractTagFilter converts a Terraform set to an API RateLimitTagFilter.
-func extractTagFilter(ctx context.Context, set types.Set) (client.RateLimitTagFilter, diag.Diagnostics) {
-	var diags diag.Diagnostics
-	if set.IsNull() || set.IsUnknown() {
-		return client.RateLimitTagFilter{Relation: "OR", Tags: []string{}}, diags
-	}
-	var models []RateLimitTagFilterModel
-	diags = set.ElementsAs(ctx, &models, false)
-	if diags.HasError() {
-		return client.RateLimitTagFilter{}, diags
-	}
-	if len(models) == 0 {
-		return client.RateLimitTagFilter{Relation: "OR", Tags: []string{}}, diags
-	}
-	model := models[0]
-	var tags []string
-	diags.Append(model.Tags.ElementsAs(ctx, &tags, false)...)
-	return client.RateLimitTagFilter{
-		Relation: model.Relation.ValueString(),
-		Tags:     tags,
-	}, diags
-}
-
-// tagFilterToSet converts an API RateLimitTagFilter to a Terraform set.
-func tagFilterToSet(ctx context.Context, filter client.RateLimitTagFilter) (types.Set, diag.Diagnostics) {
-	tags := filter.Tags
-	if tags == nil {
-		tags = []string{}
-	}
-	tagsList, diags := types.ListValueFrom(ctx, types.StringType, tags)
-	if diags.HasError() {
-		return types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}), diags
-	}
-	obj, d := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
-		"relation": types.StringValue(filter.Relation),
-		"tags":     tagsList,
-	})
-	diags.Append(d...)
-	if diags.HasError() {
-		return types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}), diags
-	}
-	set, d := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{obj})
-	diags.Append(d...)
-	return set, diags
 }

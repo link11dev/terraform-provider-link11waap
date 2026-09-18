@@ -7,6 +7,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/link11/terraform-provider-link11waap/internal/client"
 )
 
@@ -427,82 +428,123 @@ func TestRateLimitRuleResource_ImportState_TooManyParts(t *testing.T) {
 	}
 }
 
-func TestTagFilterToSet_WithTags(t *testing.T) {
+// mustTagFilterAttrs returns the attributes of a non-null tag filter object,
+// failing the test if the object is null or unknown.
+func mustTagFilterAttrs(t *testing.T, obj types.Object) (string, []string) {
+	t.Helper()
+	if obj.IsNull() || obj.IsUnknown() {
+		t.Fatal("expected a known, non-null tag filter object")
+	}
+	var m RateLimitTagFilterModel
+	if diags := obj.As(context.Background(), &m, basetypes.ObjectAsOptions{}); diags.HasError() {
+		t.Fatalf("unexpected diags: %v", diags)
+	}
+	var tags []string
+	if !m.Tags.IsNull() {
+		if diags := m.Tags.ElementsAs(context.Background(), &tags, false); diags.HasError() {
+			t.Fatalf("unexpected diags: %v", diags)
+		}
+	}
+	return m.Relation.ValueString(), tags
+}
+
+func TestTagFilterToObject_WithTags(t *testing.T) {
 	ctx := context.Background()
 	filter := client.RateLimitTagFilter{
 		Relation: "OR",
 		Tags:     []string{"tag1", "tag2"},
 	}
 
-	result, diags := tagFilterToSet(ctx, filter)
+	result, diags := tagFilterToObject(ctx, filter)
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
-	if result.IsNull() {
-		t.Fatal("expected non-null set")
+	relation, tags := mustTagFilterAttrs(t, result)
+	if relation != "OR" || len(tags) != 2 || tags[0] != "tag1" || tags[1] != "tag2" {
+		t.Fatalf("unexpected object contents: relation=%q tags=%v", relation, tags)
 	}
 }
 
-func TestTagFilterToSet_NilTags(t *testing.T) {
+func TestTagFilterToObject_NilTags(t *testing.T) {
 	ctx := context.Background()
 	filter := client.RateLimitTagFilter{
 		Relation: "AND",
 		Tags:     nil,
 	}
 
-	result, diags := tagFilterToSet(ctx, filter)
+	result, diags := tagFilterToObject(ctx, filter)
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
-	if result.IsNull() {
-		t.Fatal("expected non-null set even with nil tags")
+	relation, tags := mustTagFilterAttrs(t, result)
+	if relation != "AND" || tags == nil || len(tags) != 0 {
+		t.Fatalf("expected an empty (not null) tag list, got relation=%q tags=%v", relation, tags)
 	}
 }
 
-func TestTagFilterToSet_EmptyTags(t *testing.T) {
+func TestTagFilterToObject_EmptyTags(t *testing.T) {
 	ctx := context.Background()
 	filter := client.RateLimitTagFilter{
 		Relation: "OR",
 		Tags:     []string{},
 	}
 
-	result, diags := tagFilterToSet(ctx, filter)
+	result, diags := tagFilterToObject(ctx, filter)
 
 	if diags.HasError() {
 		t.Fatalf("unexpected error: %v", diags)
 	}
-	if result.IsNull() {
-		t.Fatal("expected non-null set")
+	relation, tags := mustTagFilterAttrs(t, result)
+	if relation != "OR" || len(tags) != 0 {
+		t.Fatalf("unexpected object contents: relation=%q tags=%v", relation, tags)
 	}
 }
 
-func TestExtractTagFilter_UnknownSet(t *testing.T) {
+func TestExtractTagFilter_UnknownObject(t *testing.T) {
 	ctx := context.Background()
-	set := types.SetUnknown(types.ObjectType{AttrTypes: tagFilterAttrTypes})
+	obj := types.ObjectUnknown(tagFilterAttrTypes)
 
-	result, diags := extractTagFilter(ctx, set)
+	result, diags := extractTagFilter(ctx, obj)
 
 	if diags.HasError() {
-		t.Fatalf("unexpected error for unknown set: %v", diags)
+		t.Fatalf("unexpected error for unknown object: %v", diags)
 	}
 	if result.Relation != "OR" || len(result.Tags) != 0 {
 		t.Fatalf("expected default OR filter with no tags, got %+v", result)
 	}
 }
 
-func TestExtractTagFilter_NullSet(t *testing.T) {
+func TestExtractTagFilter_NullObject(t *testing.T) {
 	ctx := context.Background()
-	set := types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes})
+	obj := types.ObjectNull(tagFilterAttrTypes)
 
-	result, diags := extractTagFilter(ctx, set)
+	result, diags := extractTagFilter(ctx, obj)
 
 	if diags.HasError() {
-		t.Fatalf("unexpected error for null set: %v", diags)
+		t.Fatalf("unexpected error for null object: %v", diags)
 	}
 	if result.Relation != "OR" || len(result.Tags) != 0 {
 		t.Fatalf("expected default OR filter with no tags, got %+v", result)
+	}
+}
+
+func TestExtractTagFilter_Populated(t *testing.T) {
+	ctx := context.Background()
+	tagsList, _ := types.ListValueFrom(ctx, types.StringType, []string{"tor", "global-blacklist"})
+	obj, _ := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
+		"relation": types.StringValue("AND"),
+		"tags":     tagsList,
+	})
+
+	result, diags := extractTagFilter(ctx, obj)
+
+	if diags.HasError() {
+		t.Fatalf("unexpected error: %v", diags)
+	}
+	if result.Relation != "AND" || len(result.Tags) != 2 || result.Tags[1] != "global-blacklist" {
+		t.Fatalf("unexpected filter: %+v", result)
 	}
 }
 
@@ -520,14 +562,12 @@ func mustRateLimitKeyList(t *testing.T, keys []RateLimitKeyModel) types.List {
 func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 	ctx := context.Background()
 
-	// Create include/exclude sets
+	// Create include/exclude objects
 	tagsList, _ := types.ListValueFrom(ctx, types.StringType, []string{"tag1"})
 	includeObj, _ := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
 		"relation": types.StringValue("OR"),
 		"tags":     tagsList,
 	})
-	includeSet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{includeObj})
-	excludeSet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{includeObj})
 
 	plan := &RateLimitRuleResourceModel{
 		ID:          types.StringValue("rl-1"),
@@ -545,8 +585,8 @@ func TestBuildRateLimitRuleAPIModel_BasicFields(t *testing.T) {
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
-		Include:  includeSet,
-		Exclude:  excludeSet,
+		Include:  includeObj,
+		Exclude:  includeObj,
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -584,7 +624,6 @@ func TestBuildRateLimitRuleAPIModel_NullPairwith(t *testing.T) {
 		"relation": types.StringValue("OR"),
 		"tags":     emptyTagsList,
 	})
-	emptySet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{emptyObj})
 
 	plan := &RateLimitRuleResourceModel{
 		ID:          types.StringValue("rl-2"),
@@ -602,8 +641,8 @@ func TestBuildRateLimitRuleAPIModel_NullPairwith(t *testing.T) {
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		}),
 		Pairwith: types.StringNull(),
-		Include:  emptySet,
-		Exclude:  emptySet,
+		Include:  emptyObj,
+		Exclude:  emptyObj,
 		ConfigID: types.StringValue("cfg1"),
 	}
 
@@ -633,7 +672,6 @@ func TestBuildRateLimitRuleAPIModel_WithTags(t *testing.T) {
 		"relation": types.StringValue("OR"),
 		"tags":     emptyTagsList,
 	})
-	emptySet, _ := types.SetValue(types.ObjectType{AttrTypes: tagFilterAttrTypes}, []attr.Value{emptyObj})
 
 	plan := &RateLimitRuleResourceModel{
 		ID:          types.StringValue("rl-3"),
@@ -651,8 +689,8 @@ func TestBuildRateLimitRuleAPIModel_WithTags(t *testing.T) {
 			{Attrs: types.StringValue("ip"), Args: types.StringNull(), Plugins: types.StringNull(), Cookies: types.StringNull(), Headers: types.StringNull()},
 		}),
 		Pairwith: types.StringValue(`{"self":"self"}`),
-		Include:  emptySet,
-		Exclude:  emptySet,
+		Include:  emptyObj,
+		Exclude:  emptyObj,
 		ConfigID: types.StringValue("cfg1"),
 	}
 
