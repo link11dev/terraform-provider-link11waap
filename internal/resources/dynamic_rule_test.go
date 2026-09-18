@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
@@ -17,12 +19,46 @@ func tagFilterObjType() tftypes.Object {
 	}}
 }
 
+// tagFilterSetValue builds a schema version 0 include/exclude value (a set of tag
+// filter objects). Still used by the state upgrade tests.
 func tagFilterSetValue(objType tftypes.Object, entries ...map[string]tftypes.Value) tftypes.Value {
 	elems := make([]tftypes.Value, 0, len(entries))
 	for _, e := range entries {
 		elems = append(elems, tftypes.NewValue(objType, e))
 	}
 	return tftypes.NewValue(tftypes.Set{ElementType: objType}, elems)
+}
+
+// tagFilterEntry returns the raw attribute values of a tag filter block.
+func tagFilterEntry(relation string, tags ...string) map[string]tftypes.Value {
+	tagValues := make([]tftypes.Value, 0, len(tags))
+	for _, tag := range tags {
+		tagValues = append(tagValues, tftypes.NewValue(tftypes.String, tag))
+	}
+	return map[string]tftypes.Value{
+		"relation": tftypes.NewValue(tftypes.String, relation),
+		"tags":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, tagValues),
+	}
+}
+
+// tagFilterObject builds the framework value of an include/exclude block.
+func tagFilterObject(t *testing.T, relation string, tags ...string) types.Object {
+	t.Helper()
+	if tags == nil {
+		tags = []string{}
+	}
+	tagsList, diags := types.ListValueFrom(context.Background(), types.StringType, tags)
+	if diags.HasError() {
+		t.Fatalf("unexpected diags building tags: %v", diags)
+	}
+	obj, diags := types.ObjectValue(tagFilterAttrTypes, map[string]attr.Value{
+		"relation": types.StringValue(relation),
+		"tags":     tagsList,
+	})
+	if diags.HasError() {
+		t.Fatalf("unexpected diags building tag filter: %v", diags)
+	}
+	return obj
 }
 
 func TestNewDynamicRuleResource(t *testing.T) {
@@ -61,9 +97,21 @@ func TestDynamicRuleResource_Schema(t *testing.T) {
 		}
 	}
 	for _, b := range []string{"include", "exclude"} {
-		if _, ok := sResp.Schema.Blocks[b]; !ok {
+		block, ok := sResp.Schema.Blocks[b]
+		if !ok {
 			t.Errorf("expected block %q in schema", b)
+			continue
 		}
+		// WP-2552: the blocks must be single nested blocks, otherwise Terraform
+		// identifies them by a hash of their whole value and a single tag change
+		// re-renders the entire block.
+		if _, ok := block.(schema.SingleNestedBlock); !ok {
+			t.Errorf("expected block %q to be a SingleNestedBlock, got %T", b, block)
+		}
+	}
+
+	if sResp.Schema.Version != dynamicRuleSchemaVersion {
+		t.Errorf("expected schema version %d, got %d", dynamicRuleSchemaVersion, sResp.Schema.Version)
 	}
 }
 
@@ -115,8 +163,8 @@ func TestBuildDynamicRuleAPIModel_BasicFields(t *testing.T) {
 		Target:             types.StringValue("ip"),
 		Action:             types.StringValue("action-monitor"),
 		Tags:               types.ListNull(types.StringType),
-		Include:            types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}),
-		Exclude:            types.SetNull(types.ObjectType{AttrTypes: tagFilterAttrTypes}),
+		Include:            tagFilterObject(t, "OR", "facebook"),
+		Exclude:            tagFilterObject(t, "AND"),
 	}
 	rule, diags := buildDynamicRuleAPIModel(ctx, plan)
 	if diags.HasError() {
@@ -125,17 +173,63 @@ func TestBuildDynamicRuleAPIModel_BasicFields(t *testing.T) {
 	if rule.Target != "ip" || rule.Threshold != 100 || rule.TTL != 300 {
 		t.Errorf("unexpected mapping: %+v", rule)
 	}
+	if rule.Include.Relation != "OR" || len(rule.Include.Tags) != 1 || rule.Include.Tags[0] != "facebook" {
+		t.Errorf("unexpected include mapping: %+v", rule.Include)
+	}
+	if rule.Exclude.Relation != "AND" || len(rule.Exclude.Tags) != 0 {
+		t.Errorf("unexpected exclude mapping: %+v", rule.Exclude)
+	}
+}
+
+// A null include/exclude cannot be rejected by ValidateConfig when it only becomes
+// known at plan time (dynamic blocks), so buildDynamicRuleAPIModel enforces the
+// "exactly one block" rule as well.
+func TestBuildDynamicRuleAPIModel_RejectsMissingBlocks(t *testing.T) {
+	ctx := context.Background()
+	nullFilter := types.ObjectNull(tagFilterAttrTypes)
+
+	tests := []struct {
+		name    string
+		include types.Object
+		exclude types.Object
+	}{
+		{"include missing", nullFilter, tagFilterObject(t, "OR")},
+		{"exclude missing", tagFilterObject(t, "OR"), nullFilter},
+		{"both missing", nullFilter, nullFilter},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &DynamicRuleResourceModel{
+				ID:      types.StringValue("dr1"),
+				Name:    types.StringValue("dyn"),
+				Target:  types.StringValue("ip"),
+				Tags:    types.ListNull(types.StringType),
+				Include: tc.include,
+				Exclude: tc.exclude,
+			}
+			if _, diags := buildDynamicRuleAPIModel(ctx, plan); !diags.HasError() {
+				t.Error("expected an error for a missing include/exclude block")
+			}
+		})
+	}
 }
 
 func TestDynamicRuleResource_ValidateConfig_RequiresBothIncludeAndExclude(t *testing.T) {
 	ctx := context.Background()
 	r := &DynamicRuleResource{}
 	objType := tagFilterObjType()
-	emptySet := tagFilterSetValue(objType)
-	oneEntry := map[string]tftypes.Value{
+	nullBlock := tftypes.NewValue(objType, nil)
+	unknownBlock := tftypes.NewValue(objType, tftypes.UnknownValue)
+	oneEntry := tftypes.NewValue(objType, tagFilterEntry("OR", "a"))
+	missingTags := tftypes.NewValue(objType, map[string]tftypes.Value{
 		"relation": tftypes.NewValue(tftypes.String, "OR"),
-		"tags":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{tftypes.NewValue(tftypes.String, "a")}),
-	}
+		"tags":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, nil),
+	})
+	missingRelation := tftypes.NewValue(objType, map[string]tftypes.Value{
+		"relation": tftypes.NewValue(tftypes.String, nil),
+		"tags":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, []tftypes.Value{}),
+	})
 
 	tests := []struct {
 		name      string
@@ -143,10 +237,15 @@ func TestDynamicRuleResource_ValidateConfig_RequiresBothIncludeAndExclude(t *tes
 		exclude   tftypes.Value
 		expectErr bool
 	}{
-		{"only include", tagFilterSetValue(objType, oneEntry), emptySet, true},
-		{"only exclude", emptySet, tagFilterSetValue(objType, oneEntry), true},
-		{"neither", emptySet, emptySet, true},
-		{"both", tagFilterSetValue(objType, oneEntry), tagFilterSetValue(objType, oneEntry), false},
+		{"only include", oneEntry, nullBlock, true},
+		{"only exclude", nullBlock, oneEntry, true},
+		{"neither", nullBlock, nullBlock, true},
+		{"both", oneEntry, oneEntry, false},
+		{"tags omitted", oneEntry, missingTags, true},
+		{"relation omitted", missingRelation, oneEntry, true},
+		// Values produced by a dynamic block are only known at apply time; they
+		// are re-checked in buildDynamicRuleAPIModel.
+		{"unknown blocks", unknownBlock, unknownBlock, false},
 	}
 
 	for _, tc := range tests {

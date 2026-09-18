@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
-	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -24,6 +23,7 @@ var (
 	_ resource.Resource                   = &DynamicRuleResource{}
 	_ resource.ResourceWithImportState    = &DynamicRuleResource{}
 	_ resource.ResourceWithValidateConfig = &DynamicRuleResource{}
+	_ resource.ResourceWithUpgradeState   = &DynamicRuleResource{}
 )
 
 // DynamicRuleResource implements the resource for managing a dynamic rule
@@ -45,8 +45,8 @@ type DynamicRuleResourceModel struct {
 	Target             types.String `tfsdk:"target"`
 	Action             types.String `tfsdk:"action"`
 	Tags               types.List   `tfsdk:"tags"`
-	Include            types.Set    `tfsdk:"include"`
-	Exclude            types.Set    `tfsdk:"exclude"`
+	Include            types.Object `tfsdk:"include"`
+	Exclude            types.Object `tfsdk:"exclude"`
 }
 
 // NewDynamicRuleResource returns a new instance of the dynamic rule resource
@@ -62,6 +62,7 @@ func (r *DynamicRuleResource) Metadata(_ context.Context, req resource.MetadataR
 // Schema defines the schema for the dynamic rule resource
 func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Version:     dynamicRuleSchemaVersion,
 		Description: "Manages a Dynamic Rule in Link11 WAAP.",
 		Attributes: map[string]schema.Attribute{
 			"config_id": schema.StringAttribute{
@@ -133,44 +134,12 @@ func (r *DynamicRuleResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 		},
 		Blocks: map[string]schema.Block{
-			"include": schema.SetNestedBlock{
-				Description: "Include filter: requests matching these tags are counted.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
-						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
-					},
-				},
-			},
-			"exclude": schema.SetNestedBlock{
-				Description: "Exclude filter: requests matching these tags are excluded from counting.",
-				NestedObject: schema.NestedBlockObject{
-					Attributes: map[string]schema.Attribute{
-						"relation": schema.StringAttribute{
-							Description: "Relation between tags. Valid values: OR, AND.",
-							Required:    true,
-							Validators: []validator.String{
-								stringvalidator.OneOf("OR", "AND"),
-							},
-						},
-						"tags": schema.ListAttribute{
-							Description: "List of tag identifiers.",
-							Required:    true,
-							ElementType: types.StringType,
-						},
-					},
-				},
-			},
+			"include": tagFilterBlockSchema(
+				"Include filter: requests matching these tags are counted. Exactly one block is required.",
+			),
+			"exclude": tagFilterBlockSchema(
+				"Exclude filter: requests matching these tags are excluded from counting. Exactly one block is required.",
+			),
 		},
 	}
 }
@@ -183,27 +152,8 @@ func (r *DynamicRuleResource) ValidateConfig(ctx context.Context, req resource.V
 		return
 	}
 
-	includeCount := 0
-	if !config.Include.IsNull() && !config.Include.IsUnknown() {
-		includeCount = len(config.Include.Elements())
-	}
-	excludeCount := 0
-	if !config.Exclude.IsNull() && !config.Exclude.IsUnknown() {
-		excludeCount = len(config.Exclude.Elements())
-	}
-
-	if includeCount != 1 {
-		resp.Diagnostics.AddError(
-			"Invalid include configuration",
-			"Exactly one 'include' block must be specified.",
-		)
-	}
-	if excludeCount != 1 {
-		resp.Diagnostics.AddError(
-			"Invalid exclude configuration",
-			"Exactly one 'exclude' block must be specified.",
-		)
-	}
+	validateTagFilterBlock(ctx, config.Include, path.Root("include"), true, &resp.Diagnostics)
+	validateTagFilterBlock(ctx, config.Exclude, path.Root("exclude"), true, &resp.Diagnostics)
 }
 
 // Configure sets the client for the resource
@@ -280,14 +230,14 @@ func (r *DynamicRuleResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	// Include
-	includeSet, diags := tagFilterToSet(ctx, rule.Include)
+	includeObj, diags := tagFilterToObject(ctx, rule.Include)
 	resp.Diagnostics.Append(diags...)
-	state.Include = includeSet
+	state.Include = includeObj
 
 	// Exclude
-	excludeSet, diags := tagFilterToSet(ctx, rule.Exclude)
+	excludeObj, diags := tagFilterToObject(ctx, rule.Exclude)
 	resp.Diagnostics.Append(diags...)
-	state.Exclude = excludeSet
+	state.Exclude = excludeObj
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -372,12 +322,27 @@ func buildDynamicRuleAPIModel(ctx context.Context, plan *DynamicRuleResourceMode
 		diags.Append(plan.Tags.ElementsAs(ctx, &rule.Tags, false)...)
 	}
 
-	// Include
+	// Include. ValidateConfig cannot see values that are still unknown at validate
+	// time (dynamic blocks), so "exactly one block" is enforced here as well.
+	if plan.Include.IsNull() {
+		diags.AddAttributeError(
+			path.Root("include"),
+			"Invalid include configuration",
+			"Exactly one 'include' block must be specified.",
+		)
+	}
 	includeFilter, d := extractTagFilter(ctx, plan.Include)
 	diags.Append(d...)
 	rule.Include = includeFilter
 
 	// Exclude
+	if plan.Exclude.IsNull() {
+		diags.AddAttributeError(
+			path.Root("exclude"),
+			"Invalid exclude configuration",
+			"Exactly one 'exclude' block must be specified.",
+		)
+	}
 	excludeFilter, d := extractTagFilter(ctx, plan.Exclude)
 	diags.Append(d...)
 	rule.Exclude = excludeFilter
