@@ -1017,16 +1017,6 @@ func (r *ContentFilterProfileResource) flattenProfile(ctx context.Context, p *cl
 	state.Decoding = flattenDecoding(p.Decoding)
 }
 
-// emptyListFor decides what an empty collection looks like in state. It mirrors
-// the prior value: a configuration that said `[]` keeps an empty list, while an
-// unset, unknown, or previously populated value becomes null.
-func emptyListFor(prior types.List, elemType attr.Type) types.List {
-	if !prior.IsNull() && !prior.IsUnknown() && len(prior.Elements()) == 0 {
-		return types.ListValueMust(elemType, []attr.Value{})
-	}
-	return types.ListNull(elemType)
-}
-
 // priorListAttr reads a list attribute out of a prior object value, falling back
 // to a null list when the object or the attribute is not available.
 func priorListAttr(obj types.Object, name string, elemType attr.Type) types.List {
