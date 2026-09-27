@@ -408,3 +408,167 @@ func TestContentFilterProfileResource_flattenProfile_EmptyLists(t *testing.T) {
 	require.True(t, ok)
 	assert.True(t, names.IsNull(), "empty names slice should produce null list")
 }
+
+// --- empty list round-trip (issue #31) ---
+
+// emptyStringList is a known, zero-element list of strings, the value Terraform
+// produces for `x = []` in configuration.
+func emptyStringList() types.List {
+	return types.ListValueMust(types.StringType, []attr.Value{})
+}
+
+// TestContentFilterProfileResource_EmptyListsRoundTrip covers the create/update
+// path: the plan is built into the API struct and flattened straight back into
+// state, so an explicitly empty list has to stay an empty list. Collapsing it to
+// null makes Terraform report "Provider produced inconsistent result after apply".
+func TestContentFilterProfileResource_EmptyListsRoundTrip(t *testing.T) {
+	r := &ContentFilterProfileResource{}
+	ctx := context.Background()
+
+	entryObjType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
+	entry := types.ObjectValueMust(cfEntryMatchAttrTypes(), map[string]attr.Value{
+		"id":                  types.StringValue(""),
+		"parameter":           types.StringValue("password"),
+		"value":               types.StringValue(".+"),
+		"restrict":            types.BoolValue(false),
+		"mask":                types.BoolValue(true),
+		"ignore_cf_rule_tags": emptyStringList(),
+		"case_insensitive":    types.BoolValue(false),
+		"active":              types.BoolValue(true),
+	})
+
+	args := types.ObjectValueMust(cfSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(1),
+		"max_length":        types.Int64Value(1024),
+		"enable_max_count":  types.BoolValue(false),
+		"enable_max_length": types.BoolValue(false),
+		"names":             types.ListValueMust(entryObjType, []attr.Value{entry}),
+		"regex":             types.ListValueMust(entryObjType, []attr.Value{}),
+	})
+
+	plan := &ContentFilterProfileResourceModel{
+		ID:          types.StringValue("id1"),
+		Name:        types.StringValue("profile"),
+		MaskingSeed: types.StringValue("seed"),
+		ContentType: emptyStringList(),
+		Tags:        emptyStringList(),
+		Active:      types.ListNull(types.StringType),
+		Report:      types.ListNull(types.StringType),
+		Ignore:      types.ListNull(types.StringType),
+		Args:        args,
+		Headers:     emptySectionObject(),
+		Cookies:     emptySectionObject(),
+		Path:        emptyPathSectionObject(),
+		URL:         emptyURLSectionObject(),
+		AllSections: emptySectionObject(),
+		Decoding:    emptyDecodingObject(),
+	}
+
+	var diags diag.Diagnostics
+	p := r.buildProfile(ctx, plan, &diags)
+	require.False(t, diags.HasError(), "diags: %v", diags)
+
+	state := *plan
+	r.flattenProfile(ctx, p, &state, &diags)
+	require.False(t, diags.HasError(), "diags: %v", diags)
+
+	// Top-level lists written as [] stay [].
+	assert.False(t, state.ContentType.IsNull(), "content_type = [] must not become null")
+	assert.Empty(t, state.ContentType.Elements())
+	assert.False(t, state.Tags.IsNull(), "tags = [] must not become null")
+	assert.Empty(t, state.Tags.Elements())
+
+	// Lists left unset stay null.
+	assert.True(t, state.Active.IsNull())
+	assert.True(t, state.Report.IsNull())
+	assert.True(t, state.Ignore.IsNull())
+
+	// An empty block list stays empty.
+	stateArgs := state.Args.Attributes()
+	regex, ok := stateArgs["regex"].(types.List)
+	require.True(t, ok)
+	assert.False(t, regex.IsNull(), "regex = [] must not become null")
+	assert.Empty(t, regex.Elements())
+
+	// The nested attribute from the issue report.
+	names, ok := stateArgs["names"].(types.List)
+	require.True(t, ok)
+	require.Len(t, names.Elements(), 1)
+	nameEntry, ok := names.Elements()[0].(types.Object)
+	require.True(t, ok)
+	tags, ok := nameEntry.Attributes()["ignore_cf_rule_tags"].(types.List)
+	require.True(t, ok)
+	assert.False(t, tags.IsNull(), "args.names[0].ignore_cf_rule_tags = [] must not become null")
+	assert.Empty(t, tags.Elements())
+
+	// The provider-generated entry id is still filled in.
+	assert.NotEmpty(t, nameEntry.Attributes()["id"].(types.String).ValueString())
+}
+
+// TestContentFilterProfileResource_NullListsRoundTrip is the counterpart: an
+// unset list must not gain an empty value either.
+func TestContentFilterProfileResource_NullListsRoundTrip(t *testing.T) {
+	r := &ContentFilterProfileResource{}
+	ctx := context.Background()
+
+	entryObjType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
+	entry := types.ObjectValueMust(cfEntryMatchAttrTypes(), map[string]attr.Value{
+		"id":                  types.StringValue(""),
+		"parameter":           types.StringValue("password"),
+		"value":               types.StringValue(".+"),
+		"restrict":            types.BoolValue(false),
+		"mask":                types.BoolValue(true),
+		"ignore_cf_rule_tags": types.ListNull(types.StringType),
+		"case_insensitive":    types.BoolValue(false),
+		"active":              types.BoolValue(true),
+	})
+
+	args := types.ObjectValueMust(cfSectionAttrTypes(), map[string]attr.Value{
+		"max_count":         types.Int64Value(1),
+		"max_length":        types.Int64Value(1024),
+		"enable_max_count":  types.BoolValue(false),
+		"enable_max_length": types.BoolValue(false),
+		"names":             types.ListValueMust(entryObjType, []attr.Value{entry}),
+		"regex":             types.ListNull(entryObjType),
+	})
+
+	plan := &ContentFilterProfileResourceModel{
+		ID:          types.StringValue("id1"),
+		Name:        types.StringValue("profile"),
+		MaskingSeed: types.StringValue("seed"),
+		ContentType: types.ListNull(types.StringType),
+		Tags:        types.ListNull(types.StringType),
+		Args:        args,
+		Headers:     emptySectionObject(),
+		Cookies:     emptySectionObject(),
+		Path:        emptyPathSectionObject(),
+		URL:         emptyURLSectionObject(),
+		AllSections: emptySectionObject(),
+		Decoding:    emptyDecodingObject(),
+	}
+
+	var diags diag.Diagnostics
+	p := r.buildProfile(ctx, plan, &diags)
+	require.False(t, diags.HasError(), "diags: %v", diags)
+
+	state := *plan
+	r.flattenProfile(ctx, p, &state, &diags)
+	require.False(t, diags.HasError(), "diags: %v", diags)
+
+	assert.True(t, state.ContentType.IsNull())
+	assert.True(t, state.Tags.IsNull())
+
+	stateArgs := state.Args.Attributes()
+	regex, ok := stateArgs["regex"].(types.List)
+	require.True(t, ok)
+	assert.True(t, regex.IsNull(), "unset regex must stay null")
+
+	names, ok := stateArgs["names"].(types.List)
+	require.True(t, ok)
+	require.Len(t, names.Elements(), 1)
+	nameEntry, ok := names.Elements()[0].(types.Object)
+	require.True(t, ok)
+	tags, ok := nameEntry.Attributes()["ignore_cf_rule_tags"].(types.List)
+	require.True(t, ok)
+	assert.True(t, tags.IsNull(), "unset ignore_cf_rule_tags must stay null")
+}
