@@ -324,25 +324,13 @@ func buildDynamicRuleAPIModel(ctx context.Context, plan *DynamicRuleResourceMode
 
 	// Include. ValidateConfig cannot see values that are still unknown at validate
 	// time (dynamic blocks), so "exactly one block" is enforced here as well.
-	if plan.Include.IsNull() {
-		diags.AddAttributeError(
-			path.Root("include"),
-			"Invalid include configuration",
-			"Exactly one 'include' block must be specified.",
-		)
-	}
+	validateTagFilterBlock(ctx, plan.Include, path.Root("include"), true, &diags)
 	includeFilter, d := extractTagFilter(ctx, plan.Include)
 	diags.Append(d...)
 	rule.Include = includeFilter
 
 	// Exclude
-	if plan.Exclude.IsNull() {
-		diags.AddAttributeError(
-			path.Root("exclude"),
-			"Invalid exclude configuration",
-			"Exactly one 'exclude' block must be specified.",
-		)
-	}
+	validateTagFilterBlock(ctx, plan.Exclude, path.Root("exclude"), true, &diags)
 	excludeFilter, d := extractTagFilter(ctx, plan.Exclude)
 	diags.Append(d...)
 	rule.Exclude = excludeFilter
