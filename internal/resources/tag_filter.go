@@ -194,6 +194,11 @@ func tagFilterSetToObject(ctx context.Context, set types.Set, p path.Path) (type
 
 	// Normalise a null tags list to an empty list so the upgraded state cannot
 	// differ from a configuration that writes tags = [].
+	//
+	// The V0 schema marks 'tags' Required, but that is only enforced when
+	// Terraform plans/applies a config; it is not re-checked when this upgrader
+	// decodes raw bytes from an existing state file, so a hand-edited or
+	// otherwise irregular prior state can still hold a null value here.
 	attrs := obj.Attributes()
 	if tagsAttr, found := attrs["tags"]; !found || tagsAttr == nil || tagsAttr.IsNull() {
 		emptyTags, d := types.ListValueFrom(ctx, types.StringType, []string{})
