@@ -10,12 +10,14 @@ import (
 // Terraform distinguishes an unset list from an explicitly empty one, and for an
 // Optional attribute that is not Computed it requires state to match
 // configuration exactly. The provider's round trip does not preserve that
-// distinction: every list field in internal/client carries `omitempty`, so an
-// empty slice is never transmitted, and what comes back decodes to a
-// zero-length slice whether the key was absent, null or `[]`. (JSON itself can
-// tell nil from `[]`; dropping `omitempty` would be the alternative fix, but it
-// changes what goes on the wire and it is unverified whether the API stores an
-// empty array distinctly from an absent one.)
+// distinction. Most list fields in internal/client carry `omitempty`, so an
+// empty slice is never transmitted. The section matcher lists (names, regex,
+// text) do not, and send `[]` or null as configured, but the flatten code only
+// looks at the length of what comes back, so an absent key, null and `[]` all
+// read as the same zero-length slice. (JSON itself can tell nil from `[]`;
+// relying on that would be the alternative fix, but it changes what goes on
+// the wire and it is unverified whether the API stores and echoes an empty
+// array distinctly from an absent one.)
 //
 // So the distinction is recovered from the prior value instead — the plan on
 // create/update, the previous state on read. This function mirrors it: a
