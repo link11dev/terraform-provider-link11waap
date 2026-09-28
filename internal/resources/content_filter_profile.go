@@ -983,7 +983,16 @@ func buildDecoding(ctx context.Context, obj types.Object, diags *diag.Diagnostic
 }
 
 // flattenProfile maps the API client struct back into the resource state model.
+//
+// The API representation cannot express the difference between an unset list and
+// an explicitly empty one: both are a zero-length slice. The prior model — the
+// plan on create/update, the previous state on read — is therefore consulted to
+// decide whether an empty result becomes a null list or an empty list, so that
+// an `x = []` in configuration survives the round trip instead of collapsing to
+// null and tripping Terraform's post-apply consistency check.
 func (r *ContentFilterProfileResource) flattenProfile(ctx context.Context, p *client.ContentFilterProfile, state *ContentFilterProfileResourceModel, diags *diag.Diagnostics) {
+	prior := *state
+
 	state.ID = types.StringValue(p.ID)
 	state.Name = types.StringValue(p.Name)
 	state.Description = types.StringValue(p.Description)
@@ -993,25 +1002,57 @@ func (r *ContentFilterProfileResource) flattenProfile(ctx context.Context, p *cl
 	state.IgnoreBody = types.BoolValue(p.IgnoreBody)
 	state.Action = types.StringValue(p.Action)
 
-	state.ContentType = flattenStringList(ctx, p.ContentType, diags)
-	state.Active = flattenStringList(ctx, p.Active, diags)
-	state.Report = flattenStringList(ctx, p.Report, diags)
-	state.Ignore = flattenStringList(ctx, p.Ignore, diags)
-	state.Tags = flattenStringList(ctx, p.Tags, diags)
+	state.ContentType = flattenStringList(ctx, p.ContentType, prior.ContentType, diags)
+	state.Active = flattenStringList(ctx, p.Active, prior.Active, diags)
+	state.Report = flattenStringList(ctx, p.Report, prior.Report, diags)
+	state.Ignore = flattenStringList(ctx, p.Ignore, prior.Ignore, diags)
+	state.Tags = flattenStringList(ctx, p.Tags, prior.Tags, diags)
 
-	state.Args = flattenSection(ctx, p.Args, diags)
-	state.Headers = flattenSection(ctx, p.Headers, diags)
-	state.Cookies = flattenSection(ctx, p.Cookies, diags)
-	state.Path = flattenPathSection(ctx, p.Path, diags)
-	state.URL = flattenURLSection(ctx, p.URL, diags)
-	state.AllSections = flattenSection(ctx, p.AllSections, diags)
+	state.Args = flattenSection(ctx, p.Args, prior.Args, diags)
+	state.Headers = flattenSection(ctx, p.Headers, prior.Headers, diags)
+	state.Cookies = flattenSection(ctx, p.Cookies, prior.Cookies, diags)
+	state.Path = flattenPathSection(ctx, p.Path, prior.Path, diags)
+	state.URL = flattenURLSection(ctx, p.URL, prior.URL, diags)
+	state.AllSections = flattenSection(ctx, p.AllSections, prior.AllSections, diags)
 	state.Decoding = flattenDecoding(p.Decoding)
 }
 
-// flattenStringList builds a Terraform list value, using null for empty slices.
-func flattenStringList(ctx context.Context, in []string, diags *diag.Diagnostics) types.List {
-	if len(in) == 0 {
+// priorListAttr reads a list attribute out of a prior object value, falling back
+// to a null list when the object or the attribute is not available.
+func priorListAttr(obj types.Object, name string, elemType attr.Type) types.List {
+	if obj.IsNull() || obj.IsUnknown() {
+		return types.ListNull(elemType)
+	}
+	lv, ok := obj.Attributes()[name].(types.List)
+	if !ok {
+		return types.ListNull(elemType)
+	}
+	return lv
+}
+
+// priorEntryTags reads ignore_cf_rule_tags off the i-th element of a prior
+// matcher entry list. Entries keep their configured order through the round
+// trip, so the index identifies the same entry.
+func priorEntryTags(prior types.List, i int) types.List {
+	if prior.IsNull() || prior.IsUnknown() {
 		return types.ListNull(types.StringType)
+	}
+	elements := prior.Elements()
+	if i >= len(elements) {
+		return types.ListNull(types.StringType)
+	}
+	obj, ok := elements[i].(types.Object)
+	if !ok {
+		return types.ListNull(types.StringType)
+	}
+	return priorListAttr(obj, "ignore_cf_rule_tags", types.StringType)
+}
+
+// flattenStringList builds a Terraform list value, mirroring the prior value for
+// empty slices.
+func flattenStringList(ctx context.Context, in []string, prior types.List, diags *diag.Diagnostics) types.List {
+	if len(in) == 0 {
+		return emptyListFor(prior, types.StringType)
 	}
 	lv, d := types.ListValueFrom(ctx, types.StringType, in)
 	diags.Append(d...)
@@ -1019,53 +1060,56 @@ func flattenStringList(ctx context.Context, in []string, diags *diag.Diagnostics
 }
 
 // flattenSection builds the Terraform object value for a section.
-func flattenSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
+func flattenSection(ctx context.Context, section client.ContentFilterProfileSection, prior types.Object, diags *diag.Diagnostics) types.Object {
+	entryType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
 	obj, d := types.ObjectValue(cfSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"names":             flattenEntryMatchesTypeA(ctx, section.Names, diags),
-		"regex":             flattenEntryMatchesTypeA(ctx, section.Regex, diags),
+		"names":             flattenEntryMatchesTypeA(ctx, section.Names, priorListAttr(prior, "names", entryType), diags),
+		"regex":             flattenEntryMatchesTypeA(ctx, section.Regex, priorListAttr(prior, "regex", entryType), diags),
 	})
 	diags.Append(d...)
 	return obj
 }
 
 // flattenPathSection builds the Terraform object value for the path section (url/path-style entries).
-func flattenPathSection(ctx context.Context, section client.ContentFilterProfileSection, diags *diag.Diagnostics) types.Object {
+func flattenPathSection(ctx context.Context, section client.ContentFilterProfileSection, prior types.Object, diags *diag.Diagnostics) types.Object {
+	entryType := types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}
 	obj, d := types.ObjectValue(cfPathSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"names":             flattenEntryMatchesTypeB(ctx, section.Names, diags),
-		"regex":             flattenEntryMatchesTypeB(ctx, section.Regex, diags),
-		"text":              flattenEntryMatchesTypeB(ctx, section.Text, diags),
+		"names":             flattenEntryMatchesTypeB(ctx, section.Names, priorListAttr(prior, "names", entryType), diags),
+		"regex":             flattenEntryMatchesTypeB(ctx, section.Regex, priorListAttr(prior, "regex", entryType), diags),
+		"text":              flattenEntryMatchesTypeB(ctx, section.Text, priorListAttr(prior, "text", entryType), diags),
 	})
 	diags.Append(d...)
 	return obj
 }
 
 // flattenURLSection builds the Terraform object value for the url section (no names).
-func flattenURLSection(ctx context.Context, section client.ContentFilterURLSection, diags *diag.Diagnostics) types.Object {
+func flattenURLSection(ctx context.Context, section client.ContentFilterURLSection, prior types.Object, diags *diag.Diagnostics) types.Object {
+	entryType := types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}
 	obj, d := types.ObjectValue(cfURLSectionAttrTypes(), map[string]attr.Value{
 		"max_count":         types.Int64Value(int64(section.MaxCount)),
 		"max_length":        types.Int64Value(int64(section.MaxLength)),
 		"enable_max_count":  types.BoolValue(section.EnableMaxCount),
 		"enable_max_length": types.BoolValue(section.EnableMaxLength),
-		"regex":             flattenEntryMatchesTypeB(ctx, section.Regex, diags),
-		"text":              flattenEntryMatchesTypeB(ctx, section.Text, diags),
+		"regex":             flattenEntryMatchesTypeB(ctx, section.Regex, priorListAttr(prior, "regex", entryType), diags),
+		"text":              flattenEntryMatchesTypeB(ctx, section.Text, priorListAttr(prior, "text", entryType), diags),
 	})
 	diags.Append(d...)
 	return obj
 }
 
 // flattenEntryMatchesTypeA builds the Terraform list value for parameter-style (Type A) matcher entries.
-func flattenEntryMatchesTypeA(ctx context.Context, in []client.ContentFilterEntryMatch, diags *diag.Diagnostics) types.List {
+func flattenEntryMatchesTypeA(ctx context.Context, in []client.ContentFilterEntryMatch, prior types.List, diags *diag.Diagnostics) types.List {
 	objType := types.ObjectType{AttrTypes: cfEntryMatchAttrTypes()}
 	if len(in) == 0 {
-		return types.ListNull(objType)
+		return emptyListFor(prior, objType)
 	}
 
 	models := make([]cfEntryMatchModel, len(in))
@@ -1076,7 +1120,7 @@ func flattenEntryMatchesTypeA(ctx context.Context, in []client.ContentFilterEntr
 			Value:            types.StringValue(m.Reg),
 			Restrict:         types.BoolValue(m.Restrict),
 			Mask:             types.BoolValue(m.Mask),
-			IgnoreCFRuleTags: flattenStringList(ctx, m.IgnoreCFRuleTags, diags),
+			IgnoreCFRuleTags: flattenStringList(ctx, m.IgnoreCFRuleTags, priorEntryTags(prior, i), diags),
 			CaseInsensitive:  types.BoolValue(m.CaseInsensitive),
 			Active:           types.BoolValue(m.Active),
 		}
@@ -1088,10 +1132,10 @@ func flattenEntryMatchesTypeA(ctx context.Context, in []client.ContentFilterEntr
 }
 
 // flattenEntryMatchesTypeB builds the Terraform list value for url/path-style (Type B) matcher entries.
-func flattenEntryMatchesTypeB(ctx context.Context, in []client.ContentFilterEntryMatch, diags *diag.Diagnostics) types.List {
+func flattenEntryMatchesTypeB(ctx context.Context, in []client.ContentFilterEntryMatch, prior types.List, diags *diag.Diagnostics) types.List {
 	objType := types.ObjectType{AttrTypes: cfEntryMatchURLPathAttrTypes()}
 	if len(in) == 0 {
-		return types.ListNull(objType)
+		return emptyListFor(prior, objType)
 	}
 
 	models := make([]cfEntryMatchURLPathModel, len(in))
@@ -1100,7 +1144,7 @@ func flattenEntryMatchesTypeB(ctx context.Context, in []client.ContentFilterEntr
 			ID:               types.StringValue(m.ID),
 			Restrict:         types.BoolValue(m.Restrict),
 			Mask:             types.BoolValue(m.Mask),
-			IgnoreCFRuleTags: flattenStringList(ctx, m.IgnoreCFRuleTags, diags),
+			IgnoreCFRuleTags: flattenStringList(ctx, m.IgnoreCFRuleTags, priorEntryTags(prior, i), diags),
 			Domain:           types.StringValue(m.Domain),
 			Path:             types.StringValue(m.Path),
 			CaseInsensitive:  types.BoolValue(m.CaseInsensitive),
