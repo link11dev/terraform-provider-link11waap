@@ -206,36 +206,36 @@ func (r *ACLProfileResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 
+	prior := state
+
 	state.Name = types.StringValue(profile.Name)
 	state.Description = types.StringValue(profile.Description)
 	state.Action = types.StringValue(profile.Action)
 
-	if len(profile.Tags) > 0 {
-		tagsList, diags := types.ListValueFrom(ctx, types.StringType, profile.Tags)
-		resp.Diagnostics.Append(diags...)
-		state.Tags = tagsList
-	} else {
-		state.Tags = types.ListNull(types.StringType)
-	}
-
-	state.Allow = stringSliceToList(ctx, profile.Allow, resp)
-	state.AllowBot = stringSliceToList(ctx, profile.AllowBot, resp)
-	state.Deny = stringSliceToList(ctx, profile.Deny, resp)
-	state.DenyBot = stringSliceToList(ctx, profile.DenyBot, resp)
-	state.ForceDeny = stringSliceToList(ctx, profile.ForceDeny, resp)
-	state.Passthrough = stringSliceToList(ctx, profile.Passthrough, resp)
+	state.Tags = stringSliceToList(ctx, profile.Tags, prior.Tags, resp)
+	state.Allow = stringSliceToList(ctx, profile.Allow, prior.Allow, resp)
+	state.AllowBot = stringSliceToList(ctx, profile.AllowBot, prior.AllowBot, resp)
+	state.Deny = stringSliceToList(ctx, profile.Deny, prior.Deny, resp)
+	state.DenyBot = stringSliceToList(ctx, profile.DenyBot, prior.DenyBot, resp)
+	state.ForceDeny = stringSliceToList(ctx, profile.ForceDeny, prior.ForceDeny, resp)
+	state.Passthrough = stringSliceToList(ctx, profile.Passthrough, prior.Passthrough, resp)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 // stringSliceToList converts a []string from the API to a types.List for Terraform state.
-func stringSliceToList(ctx context.Context, slice []string, resp *resource.ReadResponse) types.List {
-	if len(slice) > 0 {
-		list, diags := types.ListValueFrom(ctx, types.StringType, slice)
-		resp.Diagnostics.Append(diags...)
-		return list
+//
+// The API cannot distinguish an unset list from an explicitly empty one: both
+// come back as a zero-length slice. For an empty result the prior state value
+// therefore decides, so that an `x = []` in configuration is not rewritten to
+// null on every refresh and re-planned forever.
+func stringSliceToList(ctx context.Context, slice []string, prior types.List, resp *resource.ReadResponse) types.List {
+	if len(slice) == 0 {
+		return emptyListFor(prior, types.StringType)
 	}
-	return types.ListNull(types.StringType)
+	list, diags := types.ListValueFrom(ctx, types.StringType, slice)
+	resp.Diagnostics.Append(diags...)
+	return list
 }
 
 // Update updates the ACL profile resource.

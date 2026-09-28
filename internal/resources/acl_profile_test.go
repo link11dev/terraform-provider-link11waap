@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -86,7 +87,7 @@ func TestStringSliceToList_NonEmpty(t *testing.T) {
 	ctx := context.Background()
 	resp := &readResp{}
 
-	result := stringSliceToList(ctx, []string{"a", "b", "c"}, resp)
+	result := stringSliceToList(ctx, []string{"a", "b", "c"}, types.ListNull(types.StringType), resp)
 
 	assert.False(t, result.IsNull())
 	assert.False(t, result.IsUnknown())
@@ -100,7 +101,7 @@ func TestStringSliceToList_Empty(t *testing.T) {
 	ctx := context.Background()
 	resp := &readResp{}
 
-	result := stringSliceToList(ctx, []string{}, resp)
+	result := stringSliceToList(ctx, []string{}, types.ListNull(types.StringType), resp)
 
 	assert.True(t, result.IsNull())
 }
@@ -109,7 +110,7 @@ func TestStringSliceToList_Nil(t *testing.T) {
 	ctx := context.Background()
 	resp := &readResp{}
 
-	result := stringSliceToList(ctx, nil, resp)
+	result := stringSliceToList(ctx, nil, types.ListNull(types.StringType), resp)
 
 	assert.True(t, result.IsNull())
 }
@@ -118,7 +119,7 @@ func TestStringSliceToList_SingleElement(t *testing.T) {
 	ctx := context.Background()
 	resp := &readResp{}
 
-	result := stringSliceToList(ctx, []string{"only"}, resp)
+	result := stringSliceToList(ctx, []string{"only"}, types.ListNull(types.StringType), resp)
 
 	assert.False(t, result.IsNull())
 
@@ -150,4 +151,46 @@ func TestACLProfileResourceModel_FieldTypes(t *testing.T) {
 	assert.Equal(t, "desc", model.Description.ValueString())
 	assert.Equal(t, "703c7a701c2e", model.Action.ValueString())
 	assert.True(t, model.Tags.IsNull())
+}
+
+// --- empty list refresh behaviour ---
+
+// TestStringSliceToList_EmptyMirrorsPriorEmpty covers the perpetual-diff case:
+// a configuration that set `allow_bot = []` stores an empty list, and a refresh
+// must not rewrite it to null, or every subsequent plan re-adds the empty list.
+func TestStringSliceToList_EmptyMirrorsPriorEmpty(t *testing.T) {
+	ctx := context.Background()
+	resp := &readResp{}
+
+	prior := types.ListValueMust(types.StringType, []attr.Value{})
+
+	result := stringSliceToList(ctx, nil, prior, resp)
+
+	assert.False(t, result.IsNull(), "an explicitly empty list must survive refresh")
+	assert.Empty(t, result.Elements())
+}
+
+// TestStringSliceToList_EmptyKeepsPriorNull is the counterpart: an attribute that
+// was never set stays null rather than gaining an empty list.
+func TestStringSliceToList_EmptyKeepsPriorNull(t *testing.T) {
+	ctx := context.Background()
+	resp := &readResp{}
+
+	result := stringSliceToList(ctx, nil, types.ListNull(types.StringType), resp)
+
+	assert.True(t, result.IsNull())
+}
+
+// TestStringSliceToList_EmptyAfterPopulatedIsDrift makes sure real drift is still
+// reported: a list that had elements and now comes back empty becomes null rather
+// than silently keeping the old value.
+func TestStringSliceToList_EmptyAfterPopulatedIsDrift(t *testing.T) {
+	ctx := context.Background()
+	resp := &readResp{}
+
+	prior := types.ListValueMust(types.StringType, []attr.Value{types.StringValue("tag-a")})
+
+	result := stringSliceToList(ctx, nil, prior, resp)
+
+	assert.True(t, result.IsNull(), "removal of all elements upstream must surface as drift")
 }
