@@ -241,6 +241,32 @@ func TestAccRateLimitRuleResource_TagFilterInPlaceUpdate(t *testing.T) {
 	})
 }
 
+// TestAccRateLimitRuleResource_NoTagFilterBlocksStaysEmpty is the permadiff
+// regression test: a rate limit rule with no include/exclude blocks must stay
+// that way across a refresh, since the API echoes back a neutral filter
+// ({relation: "OR", tags: []}) for a block that was never configured. Before
+// tagFilterToObjectPreservingNull, Read would turn that into a non-null
+// object in state, and every subsequent plan would show the block being
+// removed even though the config never had it.
+func TestAccRateLimitRuleResource_NoTagFilterBlocksStaysEmpty(t *testing.T) {
+	startRuleMockBackend(t)
+
+	resource.Test(t, resource.TestCase{
+		IsUnitTest:               true,
+		ProtoV6ProviderFactories: ruleProviderFactories(),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccRateLimitRuleNoTagFiltersConfig,
+			},
+			{
+				// A refresh-only re-plan must not detect any change.
+				Config:   testAccRateLimitRuleNoTagFiltersConfig,
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
 func testAccDynamicRuleConfig(excludeTags string) string {
 	return fmt.Sprintf(`
 resource "link11waap_dynamic_rule" "test" {
@@ -367,3 +393,20 @@ resource "link11waap_rate_limit_rule" "test" {
 }
 `, excludeTags)
 }
+
+const testAccRateLimitRuleNoTagFiltersConfig = `
+resource "link11waap_rate_limit_rule" "no_filters" {
+  config_id = "test-config"
+  name      = "api-rate-limit-no-filters"
+  global    = false
+  active    = true
+  timeframe = 60
+  threshold = 100
+  ttl       = 300
+  action    = "action-monitor"
+
+  key {
+    attrs = "session"
+  }
+}
+`

@@ -134,6 +134,25 @@ func extractTagFilter(ctx context.Context, obj types.Object) (client.RateLimitTa
 	return client.RateLimitTagFilter{Relation: relation, Tags: tags}, diags
 }
 
+// tagFilterToObjectPreservingNull converts an API RateLimitTagFilter to a
+// Terraform object, like tagFilterToObject, but keeps the block absent when it
+// was absent in the prior state and the API returned its neutral filter.
+//
+// The include/exclude blocks are optional for link11waap_rate_limit_rule, but
+// the API has no way to represent "no filter": it always echoes back
+// {relation: "OR", tags: []} for a block the practitioner never configured.
+// Converting that unconditionally would turn a null block in state into a
+// non-null one on every Read, producing a permanent "remove include" diff
+// against a config that never had the block. A block explicitly configured
+// with those same neutral values is unaffected, since its prior state is
+// non-null.
+func tagFilterToObjectPreservingNull(ctx context.Context, filter client.RateLimitTagFilter, prior types.Object) (types.Object, diag.Diagnostics) {
+	if prior.IsNull() && filter.Relation == "OR" && len(filter.Tags) == 0 {
+		return types.ObjectNull(tagFilterAttrTypes), nil
+	}
+	return tagFilterToObject(ctx, filter)
+}
+
 // tagFilterToObject converts an API RateLimitTagFilter to a Terraform object.
 func tagFilterToObject(ctx context.Context, filter client.RateLimitTagFilter) (types.Object, diag.Diagnostics) {
 	tags := filter.Tags

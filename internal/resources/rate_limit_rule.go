@@ -304,13 +304,16 @@ func (r *RateLimitRuleResource) Read(ctx context.Context, req resource.ReadReque
 		state.Pairwith = types.StringNull()
 	}
 
-	// Include
-	includeObj, diags := tagFilterToObject(ctx, rule.Include)
+	// Include. include/exclude are optional for this resource, and the API
+	// always echoes back a neutral filter for a block that was never
+	// configured, so the prior state's null-ness is preserved instead of
+	// unconditionally overwriting it (see tagFilterToObjectPreservingNull).
+	includeObj, diags := tagFilterToObjectPreservingNull(ctx, rule.Include, state.Include)
 	resp.Diagnostics.Append(diags...)
 	state.Include = includeObj
 
 	// Exclude
-	excludeObj, diags := tagFilterToObject(ctx, rule.Exclude)
+	excludeObj, diags := tagFilterToObjectPreservingNull(ctx, rule.Exclude, state.Exclude)
 	resp.Diagnostics.Append(diags...)
 	state.Exclude = excludeObj
 
