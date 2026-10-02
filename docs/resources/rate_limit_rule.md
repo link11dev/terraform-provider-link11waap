@@ -87,8 +87,8 @@ resource "link11waap_rate_limit_rule" "api_rate_limit" {
 ### Optional
 
 - `description` (String) Description of the rate limit rule.
-- `exclude` (Block Set) Exclude filter: requests matching these tags are excluded from counting. (see [below for nested schema](#nestedblock--exclude))
-- `include` (Block Set) Include filter: requests matching these tags are counted. (see [below for nested schema](#nestedblock--include))
+- `exclude` (Block, Optional) Exclude filter: requests matching these tags are excluded from counting. At most one block. (see [below for nested schema](#nestedblock--exclude))
+- `include` (Block, Optional) Include filter: requests matching these tags are counted. At most one block. (see [below for nested schema](#nestedblock--include))
 - `is_action_ban` (Boolean) Whether the action is a ban action.
 - `key` (Block List) Rate limit key configuration. At least one block is required. Exactly one of attrs, args, plugins, cookies, or headers must be set per block. (see [below for nested schema](#nestedblock--key))
 - `pairwith` (String) Pair-with configuration as a JSON string.
@@ -102,19 +102,19 @@ resource "link11waap_rate_limit_rule" "api_rate_limit" {
 <a id="nestedblock--exclude"></a>
 ### Nested Schema for `exclude`
 
-Required:
+Optional:
 
-- `relation` (String) Relation between tags. Valid values: OR, AND.
-- `tags` (List of String) List of tag identifiers.
+- `relation` (String) Relation between tags. Valid values: OR, AND. Required when the block is present.
+- `tags` (List of String) List of tag identifiers. Required when the block is present.
 
 
 <a id="nestedblock--include"></a>
 ### Nested Schema for `include`
 
-Required:
+Optional:
 
-- `relation` (String) Relation between tags. Valid values: OR, AND.
-- `tags` (List of String) List of tag identifiers.
+- `relation` (String) Relation between tags. Valid values: OR, AND. Required when the block is present.
+- `tags` (List of String) List of tag identifiers. Required when the block is present.
 
 
 <a id="nestedblock--key"></a>

@@ -82,8 +82,8 @@ resource "link11waap_dynamic_rule" "burst_protection" {
 ### Optional
 
 - `description` (String) Description of the dynamic rule.
-- `exclude` (Block Set) Exclude filter: requests matching these tags are excluded from counting. (see [below for nested schema](#nestedblock--exclude))
-- `include` (Block Set) Include filter: requests matching these tags are counted. (see [below for nested schema](#nestedblock--include))
+- `exclude` (Block, Optional) Exclude filter: requests matching these tags are excluded from counting. Exactly one block is required. (see [below for nested schema](#nestedblock--exclude))
+- `include` (Block, Optional) Include filter: requests matching these tags are counted. Exactly one block is required. (see [below for nested schema](#nestedblock--include))
 - `tags` (List of String) List of tags associated with the dynamic rule.
 
 ### Read-Only
@@ -93,16 +93,16 @@ resource "link11waap_dynamic_rule" "burst_protection" {
 <a id="nestedblock--exclude"></a>
 ### Nested Schema for `exclude`
 
-Required:
+Optional:
 
-- `relation` (String) Relation between tags. Valid values: OR, AND.
-- `tags` (List of String) List of tag identifiers.
+- `relation` (String) Relation between tags. Valid values: OR, AND. Required when the block is present.
+- `tags` (List of String) List of tag identifiers. Required when the block is present.
 
 
 <a id="nestedblock--include"></a>
 ### Nested Schema for `include`
 
-Required:
+Optional:
 
-- `relation` (String) Relation between tags. Valid values: OR, AND.
-- `tags` (List of String) List of tag identifiers.
+- `relation` (String) Relation between tags. Valid values: OR, AND. Required when the block is present.
+- `tags` (List of String) List of tag identifiers. Required when the block is present.

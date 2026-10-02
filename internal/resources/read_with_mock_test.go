@@ -459,6 +459,18 @@ func TestRateLimitRuleResource_Read_WithMock(t *testing.T) {
 	})
 
 	assert.False(t, resp.Diagnostics.HasError(), "errors: %v", resp.Diagnostics)
+
+	// WP-2552: include/exclude are single objects in state, not sets.
+	var state RateLimitRuleResourceModel
+	require.False(t, resp.State.Get(context.Background(), &state).HasError())
+
+	relation, tags := mustTagFilterAttrs(t, state.Include)
+	assert.Equal(t, "OR", relation)
+	assert.Equal(t, []string{"include-tag"}, tags)
+
+	relation, tags = mustTagFilterAttrs(t, state.Exclude)
+	assert.Equal(t, "AND", relation)
+	assert.Equal(t, []string{"exclude-tag"}, tags)
 }
 
 func TestRateLimitRuleResource_Read_NotFound(t *testing.T) {
