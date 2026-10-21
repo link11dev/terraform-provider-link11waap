@@ -1,6 +1,6 @@
 module github.com/link11/terraform-provider-link11waap
 
-go 1.25.0
+go 1.26.10
 
 require (
 	github.com/hashicorp/go-uuid v1.0.3
