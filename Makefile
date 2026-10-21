@@ -4,7 +4,7 @@ SHELL := /bin/bash
 CURRENT_DIR := $(shell pwd)
 
 # golangci-lint config
-golangci_lint_version=v2.9.0
+golangci_lint_version=v2.15.0
 vols=-v `pwd`:/app -w /app
 run_lint=docker run --rm $(vols) golangci/golangci-lint:$(golangci_lint_version)
 
