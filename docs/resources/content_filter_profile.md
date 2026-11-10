@@ -223,26 +223,26 @@ resource "link11waap_content_filter_profile" "example_cf_profile" {
 - `config_id` (String) The configuration ID.
 - `masking_seed` (String) Seed used when masking values.
 - `name` (String) The name of the content filter profile.
-- `allsections` (Block) All sections section. (see [below for nested schema](#nestedblock--allsections))
-- `args` (Block) Arguments section. (see [below for nested schema](#nestedblock--args))
-- `cookies` (Block) Cookies section. (see [below for nested schema](#nestedblock--cookies))
-- `decoding` (Block) Decoding flags. (see [below for nested schema](#nestedblock--decoding))
-- `headers` (Block) Headers section. (see [below for nested schema](#nestedblock--headers))
-- `path` (Block) Path section. (see [below for nested schema](#nestedblock--path))
-- `url` (Block) URL section. (see [below for nested schema](#nestedblock--url))
 
 ### Optional
 
 - `action` (String) Action id or name applied by the profile.
 - `active` (List of String) List of active tags.
+- `allsections` (Block, Optional) All sections section. (see [below for nested schema](#nestedblock--allsections))
+- `args` (Block, Optional) Arguments section. (see [below for nested schema](#nestedblock--args))
 - `content_type` (List of String) List of content types.
+- `cookies` (Block, Optional) Cookies section. (see [below for nested schema](#nestedblock--cookies))
+- `decoding` (Block, Optional) Decoding flags. (see [below for nested schema](#nestedblock--decoding))
 - `description` (String) Description of the content filter profile.
 - `graphql_path` (String) JSONPath of the GraphQL property.
+- `headers` (Block, Optional) Headers section. (see [below for nested schema](#nestedblock--headers))
 - `ignore` (List of String) List of ignore tags.
 - `ignore_alphanum` (Boolean) When true, alphanumeric-only args/headers/cookies are ignored.
 - `ignore_body` (Boolean) Whether to ignore the request body.
+- `path` (Block, Optional) Path section. (see [below for nested schema](#nestedblock--path))
 - `report` (List of String) List of report tags.
 - `tags` (List of String) List of tags to apply.
+- `url` (Block, Optional) URL section. (see [below for nested schema](#nestedblock--url))
 
 ### Read-Only
 
